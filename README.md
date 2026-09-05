@@ -12,6 +12,10 @@ same conventions.
 > sway, and friends all support it). Workspace state is read via `hyprctl`; the
 > bar degrades gracefully on other compositors, simply hiding that widget.
 
+## Showcase
+
+![MyQuickshell desktop bar showcase](assets/myBar_showcase.png)
+
 ## Structure
 
 - `shell.qml` - entry point
