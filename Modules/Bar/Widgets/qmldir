@@ -1,0 +1,12 @@
+module qs.Modules.Bar.Widgets
+BasePill 1.0 BasePill.qml
+BatteryWidget 1.0 BatteryWidget.qml
+ClockWidget 1.0 ClockWidget.qml
+CpuWidget 1.0 CpuWidget.qml
+DiskWidget 1.0 DiskWidget.qml
+FocusedWindowWidget 1.0 FocusedWindowWidget.qml
+LauncherButton 1.0 LauncherButton.qml
+RamWidget 1.0 RamWidget.qml
+RunningAppsWidget 1.0 RunningAppsWidget.qml
+SystemTrayWidget 1.0 SystemTrayWidget.qml
+WorkspacesWidget 1.0 WorkspacesWidget.qml

@@ -1,0 +1,3 @@
+module qs.Modules.Bar
+Bar 1.0 Bar.qml
+BarBody 1.0 BarBody.qml

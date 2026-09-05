@@ -1,0 +1,7 @@
+module qs.Services
+singleton ClockService 1.0 ClockService.qml
+singleton DMSService 1.0 DMSService.qml
+singleton MatugenService 1.0 MatugenService.qml
+singleton SystemStatsService 1.0 SystemStatsService.qml
+singleton TrayService 1.0 TrayService.qml
+singleton WorkspacesService 1.0 WorkspacesService.qml
