@@ -20,12 +20,11 @@ BasePill {
       visible: root.hasBattery
       spacing: 4
 
-      Text {
-        visible: root._charging
+      DmsIcon {
+        name: root.batteryIcon()
+        size: root.iconSize(-4)
+        color: root._charging ? Theme.primary : (root._low ? Theme.error : Theme.widgetIconColor)
         anchors.verticalCenter: parent.verticalCenter
-        text: "⚡"
-        color: Theme.widgetIconColor
-        font.pixelSize: root.textSize()
       }
 
       Text {
@@ -40,4 +39,24 @@ BasePill {
 
   readonly property bool _charging: UPower.displayDevice ? UPower.displayDevice.state === 1 : false
   readonly property bool _low: root.hasBattery && root.level <= 20
+
+  function batteryIcon() {
+    if (root._charging) {
+      if (root.level >= 90) return "battery_charging_full"
+      if (root.level >= 80) return "battery_charging_90"
+      if (root.level >= 60) return "battery_charging_80"
+      if (root.level >= 50) return "battery_charging_60"
+      if (root.level >= 30) return "battery_charging_50"
+      if (root.level >= 20) return "battery_charging_30"
+      return "battery_charging_20"
+    }
+
+    if (root.level >= 95) return "battery_full"
+    if (root.level >= 85) return "battery_6_bar"
+    if (root.level >= 70) return "battery_5_bar"
+    if (root.level >= 55) return "battery_4_bar"
+    if (root.level >= 40) return "battery_3_bar"
+    if (root.level >= 25) return "battery_2_bar"
+    return "battery_1_bar"
+  }
 }

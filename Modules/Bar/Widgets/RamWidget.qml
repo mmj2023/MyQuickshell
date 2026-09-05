@@ -16,24 +16,53 @@ BasePill {
   property bool showLabel: false
 
   content: Component {
-    Column {
-      spacing: 0
-      Text {
-        anchors.horizontalCenter: parent.horizontalCenter
-        text: root.showLabel ? "MEM" : Math.round(SystemStatsService.memoryUsage) + "%"
-        color: Theme.widgetTextColor
-        font.family: Theme.monoFontFamily
-        font.pixelSize: root.textSize()
+    Item {
+      implicitWidth: collapsedRow.visible ? collapsedRow.implicitWidth : expandedColumn.implicitWidth
+      implicitHeight: collapsedRow.visible ? collapsedRow.implicitHeight : expandedColumn.implicitHeight
+      Row {
+        id: collapsedRow
+        visible: !root.showLabel
+        spacing: 4
+        anchors.centerIn: parent
+        DmsIcon {
+          name: "developer_board"
+          size: root.iconSize()
+          color: root.usageColor()
+          anchors.verticalCenter: parent.verticalCenter
+        }
+        Text {
+          text: Math.round(SystemStatsService.memoryUsage) + "%"
+          color: Theme.widgetTextColor
+          font.family: Theme.monoFontFamily
+          font.pixelSize: root.textSize()
+        }
       }
-      Text {
+      Column {
+        id: expandedColumn
         visible: root.showLabel
-        anchors.horizontalCenter: parent.horizontalCenter
-        text: SystemStatsService.memUsedText + "/" + SystemStatsService.memTotalText
-        color: Theme.widgetInactiveIconColor
-        font.family: Theme.monoFontFamily
-        font.pixelSize: Math.round(root.textSize() * 0.7)
+        spacing: 0
+        anchors.centerIn: parent
+        Text {
+          anchors.horizontalCenter: parent.horizontalCenter
+          text: "MEM"
+          color: Theme.widgetTextColor
+          font.family: Theme.monoFontFamily
+          font.pixelSize: root.textSize()
+        }
+        Text {
+          anchors.horizontalCenter: parent.horizontalCenter
+          text: SystemStatsService.memUsedText + "/" + SystemStatsService.memTotalText
+          color: Theme.widgetInactiveIconColor
+          font.family: Theme.monoFontFamily
+          font.pixelSize: Math.round(root.textSize() * 0.7)
+        }
       }
     }
+  }
+
+  function usageColor() {
+    return SystemStatsService.memoryUsage > 90 ? Theme.error
+      : (SystemStatsService.memoryUsage > 75 ? Theme.warning : Theme.widgetIconColor)
   }
 
   onClicked: root.showLabel = !root.showLabel

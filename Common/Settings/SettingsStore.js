@@ -47,7 +47,22 @@ function migrateToVersion(obj, targetVersion) {
     var settings = JSON.parse(JSON.stringify(obj));
     var currentVersion = settings.configVersion || 0;
     if (currentVersion >= targetVersion) return null;
-    // No legacy migrations yet; future versions add steps here.
+    if (currentVersion < 2) {
+        var rightWidgets = settings.barRightWidgets;
+        if (Array.isArray(rightWidgets) && !rightWidgets.some(function(widget) {
+            return widget && widget.id === "cpuTemperature";
+        })) {
+            var migratedWidgets = rightWidgets.slice();
+            var cpuIndex = migratedWidgets.findIndex(function(widget) {
+                return widget && widget.id === "cpuUsage";
+            });
+            migratedWidgets.splice(cpuIndex >= 0 ? cpuIndex + 1 : migratedWidgets.length, 0, {
+                id: "cpuTemperature",
+                enabled: true
+            });
+            settings.barRightWidgets = migratedWidgets;
+        }
+    }
     settings.configVersion = targetVersion;
     return settings;
 }

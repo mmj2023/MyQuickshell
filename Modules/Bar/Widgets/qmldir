@@ -1,5 +1,7 @@
 module qs.Modules.Bar.Widgets
 BasePill 1.0 BasePill.qml
+DmsIcon 1.0 DmsIcon.qml
+TemperatureWidget 1.0 TemperatureWidget.qml
 BatteryWidget 1.0 BatteryWidget.qml
 ClockWidget 1.0 ClockWidget.qml
 CpuWidget 1.0 CpuWidget.qml

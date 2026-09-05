@@ -14,7 +14,7 @@ import "Settings/SpecUtil.js" as Util
 Singleton {
   id: root
 
-  readonly property int settingsConfigVersion: 1
+  readonly property int settingsConfigVersion: 2
   readonly property string _configDir: StandardPaths.writableLocation(StandardPaths.ConfigLocation) + "/myquickshell"
   readonly property string settingsPath: _configDir + "/settings.json"
 
@@ -53,12 +53,27 @@ Singleton {
   property int barSpacing: 0
   property int barInnerPadding: -2
   property int barPosition: 1
+  property var hiddenTrayIds: Util.cloneDef(Spec.SPEC["hiddenTrayIds"].def)
 
   // ---- helper accessors ---------------------------------------------------
   function isBarWidgetEnabled(list, id) {
     for (var i = 0; i < list.length; i++)
       if (list[i].id === id) return list[i].enabled !== false
     return false
+  }
+
+  function hideTrayId(trayId) {
+    if (!trayId || hiddenTrayIds.indexOf(trayId) !== -1) return
+    set("hiddenTrayIds", hiddenTrayIds.concat([trayId]))
+  }
+
+  function showTrayId(trayId) {
+    if (!trayId) return
+    set("hiddenTrayIds", hiddenTrayIds.filter(function(id) { return id !== trayId }))
+  }
+
+  function isTrayHidden(trayId) {
+    return trayId && hiddenTrayIds.indexOf(trayId) !== -1
   }
 
   function set(key, value) {
@@ -110,12 +125,27 @@ Singleton {
     }
   }
 
+  function initializeDefaults() {
+    if (_hasLoaded) return
+    _loading = true
+    try {
+      Store.parse(root, null)
+      _hasLoaded = true
+      _parseError = false
+      _applyOnLoad()
+      root.settingsApplied()
+    } finally {
+      _loading = false
+    }
+  }
+
   function _applyOnLoad() {
     matugenRegenerationRequested()
   }
 
   function saveSettings() {
     if (_loading || _parseError || !_hasLoaded) return
+    if (!_file) return
     _selfWrite = true
     root._file.setText(JSON.stringify(Store.toJson(root), null, 2))
     _selfWrite = false
@@ -130,5 +160,6 @@ Singleton {
       if (root._selfWrite) return
       root.loadSettings()
     }
+    onLoadFailed: root.initializeDefaults()
   }
 }

@@ -13,6 +13,7 @@ Singleton {
   property real cpuUsage: 0
   property real memoryUsage: 0
   property real diskUsage: 0
+  property real cpuTemperature: -1
   property string memUsedText: "0B"
   property string memTotalText: "0B"
   property string diskUsedText: "0B"
@@ -25,29 +26,36 @@ Singleton {
     statsProc.running = true
   }
 
-  // Outputs one line: <cpuTotal> <cpuIdle> <memTotalKB> <memAvailKB> <diskUsedB> <diskAvailB>
+  // Outputs one line: CPU counters, memory values, disk values, and CPU temperature.
   property Process statsProc: Process {
     id: statsProc
     command: [
       "bash", "-c",
-      "read -r _ u n s i o w ir st </proc/stat; " +
-      "cpuTotal=$((u+n+s+i+o+w+ir+st)); cpuIdle=$((i+o)); " +
-      "memTotal=$(awk '/^MemTotal:/{print $2}' /proc/meminfo); " +
-      "memAvail=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo); " +
-      "eval $(df -BK / | awk 'NR==2{gsub(/K/,\"\",$2); gsub(/K/,\"\",$3); gsub(/K/,\"\",$4); print \"dSize=\"$2\" dUsed=\"$3\" dAvail=\"$4}'); " +
-      "echo \"$cpuTotal $cpuIdle $memTotal $memAvail $dUsed $dAvail $dSize\""
+      "cpu=$(awk '/^cpu / {print $2+$3+$4+$5+$6+$7+$8+$9, $5+$6}' /proc/stat); " +
+      "mem=$(awk '/^MemTotal:/{total=$2} /^MemAvailable:/{available=$2} END{print total, available}' /proc/meminfo); " +
+      "disk=$(df -Pk / | awk 'NR==2 {print $3*1024, $2*1024}'); " +
+      "temp=; " +
+      "for preferred in x86_pkg_temp TCPU_PCI TCPU; do " +
+      "for z in /sys/class/thermal/thermal_zone*/; do " +
+      "[ -r \"$z/type\" ] && [ \"$(cat \"$z/type\")\" = \"$preferred\" ] || continue; " +
+      "value=$(cat \"$z/temp\" 2>/dev/null); " +
+      "case \"$value\" in ''|*[!0-9]*) continue;; esac; " +
+      "if [ \"$value\" -ge 20000 ] && [ \"$value\" -le 120000 ]; then temp=$((value / 1000)); break 2; fi; " +
+      "done; done; echo \"$cpu $mem $disk ${temp:-0}\""
     ]
     stdout: SplitParser {
       onRead: function(line) {
         const parts = String(line).trim().split(/\s+/)
-        if (parts.length < 6) return
+        if (parts.length < 7) return
         const cpuTotal = parseFloat(parts[0]) || 0
         const cpuIdle  = parseFloat(parts[1]) || 0
         const memTotalKB = parseFloat(parts[2]) || 0
         const memAvailKB = parseFloat(parts[3]) || 0
-        const dUsedKB    = parseFloat(parts[4]) || 0
-        const dAvailKB   = parseFloat(parts[5]) || 0
-        const dSizeKB    = parts.length >= 7 ? (parseFloat(parts[6]) || 0) : (dUsedKB + dAvailKB)
+        const dUsedB     = parseFloat(parts[4]) || 0
+        const dTotalB    = parseFloat(parts[5]) || 0
+        const temperature = parseFloat(parts[6]) || 0
+        if (temperature > 0)
+          root.cpuTemperature = temperature
 
         if (root._prevTotal > 0 && cpuTotal > root._prevTotal) {
           const dTot  = cpuTotal - root._prevTotal
@@ -64,11 +72,10 @@ Singleton {
           root.memTotalText = root._fmtKB(memTotalKB)
         }
 
-        const diskTotKB = dSizeKB > 0 ? dSizeKB : (dUsedKB + dAvailKB)
-        if (diskTotKB > 0) {
-          root.diskUsage    = dUsedKB / diskTotKB * 100
-          root.diskUsedText  = root._fmtKB(dUsedKB)
-          root.diskTotalText = root._fmtKB(diskTotKB)
+        if (dTotalB > 0) {
+          root.diskUsage    = Math.min(100, Math.max(0, dUsedB / dTotalB * 100))
+          root.diskUsedText  = root._fmtBytes(dUsedB)
+          root.diskTotalText = root._fmtBytes(dTotalB)
         }
       }
     }
@@ -82,8 +89,12 @@ Singleton {
     return (v >= 100 ? Math.round(v) : Math.round(v * 10) / 10) + units[i]
   }
 
+  function _fmtBytes(bytes) {
+    return root._fmtKB(bytes / 1024)
+  }
+
   property Timer pollTimer: Timer {
-    interval: 4000
+    interval: 2000
     repeat: true
     running: true
     triggeredOnStart: true

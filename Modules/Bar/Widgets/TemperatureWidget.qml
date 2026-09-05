@@ -1,57 +1,57 @@
 import QtQuick
-import QtQuick.Layouts
-import Quickshell.Widgets
 import qs.Common
 import qs.Modules.Bar.Widgets
 import qs.Services
 
-// Disk usage pill. Reads the shared SystemStatsService so all stats share one
-// poller. Left click cycles the display format (percent vs a short label).
 BasePill {
   id: root
-
-  property var barWindow: null
-  property var parentScreen: null
 
   property bool showLabel: false
 
   content: Component {
     Item {
-      implicitWidth: collapsedRow.visible ? collapsedRow.implicitWidth : expandedColumn.implicitWidth
-      implicitHeight: collapsedRow.visible ? collapsedRow.implicitHeight : expandedColumn.implicitHeight
+      implicitWidth: compactRow.visible ? compactRow.implicitWidth : expandedColumn.implicitWidth
+      implicitHeight: compactRow.visible ? compactRow.implicitHeight : expandedColumn.implicitHeight
+
       Row {
-        id: collapsedRow
+        id: compactRow
         visible: !root.showLabel
         spacing: 4
         anchors.centerIn: parent
+
         DmsIcon {
-          name: "storage"
+          name: "device_thermostat"
           size: root.iconSize()
-          color: root.usageColor()
+          color: root.temperatureColor()
           anchors.verticalCenter: parent.verticalCenter
         }
+
         Text {
-          text: Math.round(SystemStatsService.diskUsage) + "%"
+          text: root.temperatureText()
           color: Theme.widgetTextColor
           font.family: Theme.monoFontFamily
           font.pixelSize: root.textSize()
+          anchors.verticalCenter: parent.verticalCenter
         }
       }
+
       Column {
         id: expandedColumn
         visible: root.showLabel
         spacing: 0
         anchors.centerIn: parent
+
         Text {
           anchors.horizontalCenter: parent.horizontalCenter
-          text: "DISK"
+          text: "TEMP"
           color: Theme.widgetTextColor
           font.family: Theme.monoFontFamily
           font.pixelSize: root.textSize()
         }
+
         Text {
           anchors.horizontalCenter: parent.horizontalCenter
-          text: SystemStatsService.diskUsedText + "/" + SystemStatsService.diskTotalText
+          text: root.temperatureText()
           color: Theme.widgetInactiveIconColor
           font.family: Theme.monoFontFamily
           font.pixelSize: Math.round(root.textSize() * 0.7)
@@ -60,9 +60,15 @@ BasePill {
     }
   }
 
-  function usageColor() {
-    return SystemStatsService.diskUsage > 90 ? Theme.error
-      : (SystemStatsService.diskUsage > 75 ? Theme.warning : Theme.widgetIconColor)
+  function temperatureText() {
+    return SystemStatsService.cpuTemperature > 0
+      ? Math.round(SystemStatsService.cpuTemperature) + "°"
+      : "--°"
+  }
+
+  function temperatureColor() {
+    return SystemStatsService.cpuTemperature > 85 ? Theme.error
+      : (SystemStatsService.cpuTemperature > 69 ? Theme.warning : Theme.widgetIconColor)
   }
 
   onClicked: root.showLabel = !root.showLabel

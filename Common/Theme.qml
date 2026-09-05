@@ -14,10 +14,10 @@ import qs.Services
 Singleton {
   id: root
 
-  // DMS is the source of truth for the active wallpaper-derived palette.
-  // Reading its canonical cache keeps this shell in sync when DMS regenerates
-  // colors after a wallpaper or Matugen setting change.
+  // DMS remains the source of truth until MyQuickshell's own generator is
+  // complete. Keep the local path ready as the future preferred source.
   readonly property string colorsPath: String(StandardPaths.writableLocation(StandardPaths.GenericCacheLocation)).replace(/^file:\/\//, "") + "/DankMaterialShell/dms-colors.json"
+  readonly property string localColorsPath: String(StandardPaths.writableLocation(StandardPaths.GenericCacheLocation)).replace(/^file:\/\//, "") + "/MyQuickshell/mql-colors.json"
 
   property var matugenColors: ({})
   readonly property bool isLightMode: String(matugenColors.mode || "dark") === "light"
@@ -28,15 +28,32 @@ Singleton {
     atomicWrites: true
     watchChanges: true
     onLoaded: {
-      try {
-        const txt = colorsFile.text()
-        if (txt && txt.trim())
-          root.matugenColors = JSON.parse(txt)
-      } catch (e) {
-        root.matugenColors = ({})
-      }
+      root.loadColors(colorsFile.text())
     }
     onFileChanged: colorsFile.reload()
+    onLoadFailed: localColorsFile.reload()
+  }
+
+  FileView {
+    id: localColorsFile
+    path: root.localColorsPath
+    atomicWrites: true
+    watchChanges: true
+    onLoaded: {
+      if (Object.keys(root.matugenColors).length === 0)
+        root.loadColors(localColorsFile.text())
+    }
+    onFileChanged: localColorsFile.reload()
+  }
+
+  function loadColors(text) {
+    try {
+      if (text && text.trim())
+        root.matugenColors = JSON.parse(text)
+    } catch (e) {
+      if (Object.keys(root.matugenColors).length === 0)
+        root.matugenColors = ({})
+    }
   }
 
   // Instantiate and drive MatugenService. Referencing it here (Theme is always

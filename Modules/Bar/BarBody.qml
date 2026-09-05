@@ -24,6 +24,7 @@ Item {
   Component { id: clockComp; ClockWidget {} }
   Component { id: systemTrayComp; SystemTrayWidget {} }
   Component { id: cpuUsageComp; CpuWidget {} }
+  Component { id: cpuTemperatureComp; TemperatureWidget {} }
   Component { id: memUsageComp; RamWidget {} }
   Component { id: diskUsageComp; DiskWidget {} }
   Component { id: batteryComp; BatteryWidget {} }
@@ -37,6 +38,7 @@ Item {
     case "clock": return clockComp
     case "systemTray": return systemTrayComp
     case "cpuUsage": return cpuUsageComp
+    case "cpuTemperature": return cpuTemperatureComp
     case "memUsage": return memUsageComp
     case "diskUsage": return diskUsageComp
     case "battery": return batteryComp

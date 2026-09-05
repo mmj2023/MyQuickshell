@@ -55,6 +55,7 @@ var SPEC = {
             { id: "notificationButton", enabled: true },
             { id: "systemTray", enabled: true },
             { id: "cpuUsage", enabled: true },
+            { id: "cpuTemperature", enabled: true },
             { id: "memUsage", enabled: true },
             { id: "diskUsage", enabled: true },
             { id: "battery", enabled: true },
@@ -65,5 +66,6 @@ var SPEC = {
     barWidgetTransparency: { def: 0.65, coerce: percentToUnit },
     barSpacing: { def: 0 },
     barInnerPadding: { def: -2 },
-    barPosition: { def: 1 }
+    barPosition: { def: 1 },
+    hiddenTrayIds: { def: [] }
 };
