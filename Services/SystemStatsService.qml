@@ -3,10 +3,9 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Single shared poller for CPU / memory / disk, backed by one bash process
-// that reads /proc.* and df every few seconds. Keeps previous CPU counters to
-// compute a usage delta. Exposes ready-made percentages so bar widgets share
-// one timer instead of each polling independently.
+// Shared resource pollers. CPU, memory, and temperature use cheap kernel
+// interfaces frequently; filesystem accounting is probed separately and only
+// reformatted when the filesystem's free-block signature changes.
 Singleton {
   id: root
 
@@ -18,22 +17,27 @@ Singleton {
   property string memTotalText: "0B"
   property string diskUsedText: "0B"
   property string diskTotalText: "0B"
+  property var diskMounts: []
 
   property var _prevTotal: 0
   property var _prevIdle: 0
+  property string _diskSignature: ""
 
   function refresh() {
     statsProc.running = true
   }
 
-  // Outputs one line: CPU counters, memory values, disk values, and CPU temperature.
+  function refreshDisk() {
+    diskProbe.running = true
+  }
+
+  // Outputs CPU counters, memory values, and CPU temperature.
   property Process statsProc: Process {
     id: statsProc
     command: [
       "bash", "-c",
       "cpu=$(awk '/^cpu / {print $2+$3+$4+$5+$6+$7+$8+$9, $5+$6}' /proc/stat); " +
       "mem=$(awk '/^MemTotal:/{total=$2} /^MemAvailable:/{available=$2} END{print total, available}' /proc/meminfo); " +
-      "disk=$(df -Pk / | awk 'NR==2 {print $3*1024, $2*1024}'); " +
       "temp=; " +
       "for preferred in x86_pkg_temp TCPU_PCI TCPU; do " +
       "for z in /sys/class/thermal/thermal_zone*/; do " +
@@ -41,19 +45,17 @@ Singleton {
       "value=$(cat \"$z/temp\" 2>/dev/null); " +
       "case \"$value\" in ''|*[!0-9]*) continue;; esac; " +
       "if [ \"$value\" -ge 20000 ] && [ \"$value\" -le 120000 ]; then temp=$((value / 1000)); break 2; fi; " +
-      "done; done; echo \"$cpu $mem $disk ${temp:-0}\""
+      "done; done; echo \"$cpu $mem ${temp:-0}\""
     ]
     stdout: SplitParser {
       onRead: function(line) {
         const parts = String(line).trim().split(/\s+/)
-        if (parts.length < 7) return
+        if (parts.length < 5) return
         const cpuTotal = parseFloat(parts[0]) || 0
         const cpuIdle  = parseFloat(parts[1]) || 0
         const memTotalKB = parseFloat(parts[2]) || 0
         const memAvailKB = parseFloat(parts[3]) || 0
-        const dUsedB     = parseFloat(parts[4]) || 0
-        const dTotalB    = parseFloat(parts[5]) || 0
-        const temperature = parseFloat(parts[6]) || 0
+        const temperature = parseFloat(parts[4]) || 0
         if (temperature > 0)
           root.cpuTemperature = temperature
 
@@ -72,10 +74,53 @@ Singleton {
           root.memTotalText = root._fmtKB(memTotalKB)
         }
 
-        if (dTotalB > 0) {
-          root.diskUsage    = Math.min(100, Math.max(0, dUsedB / dTotalB * 100))
-          root.diskUsedText  = root._fmtBytes(dUsedB)
-          root.diskTotalText = root._fmtBytes(dTotalB)
+      }
+    }
+  }
+
+  // Probe real mounted filesystems together. Pseudo-filesystems are excluded
+  // so the disk widget represents actual storage partitions.
+  property Process diskProbe: Process {
+    id: diskProbe
+    command: [
+      "bash", "-c",
+      "df -P -x tmpfs -x devtmpfs -x efivarfs -x squashfs -x overlay 2>/dev/null | " +
+      "awk 'NR > 1 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && !seen[$1]++ " +
+      "{print $6 \"|\" ($3 * 1024) \"|\" ($2 * 1024)}'"
+    ]
+    stdout: SplitParser {
+      onRead: function(line) {
+        const parts = String(line).trim().split("|")
+        if (parts.length < 3) return
+
+        const mount = parts[0]
+        const usedBytes = parseFloat(parts[1]) || 0
+        const totalBytes = parseFloat(parts[2]) || 0
+        if (!mount || totalBytes <= 0) return
+
+        let mounts = root.diskMounts.slice()
+        const entry = {
+          mount: mount,
+          used: usedBytes,
+          total: totalBytes,
+          usage: Math.min(100, Math.max(0, usedBytes / totalBytes * 100))
+        }
+        const index = mounts.findIndex(item => item.mount === mount)
+        if (index >= 0) {
+          const previous = mounts[index]
+          if (previous.used === entry.used && previous.total === entry.total)
+            return
+          mounts[index] = entry
+        } else {
+          mounts.push(entry)
+        }
+        root.diskMounts = mounts
+
+        const primary = root.diskMounts.find(item => item.mount === "/") || root.diskMounts[0]
+        if (primary) {
+          root.diskUsage = primary.usage
+          root.diskUsedText = root._fmtBytes(primary.used)
+          root.diskTotalText = root._fmtBytes(primary.total)
         }
       }
     }
@@ -99,5 +144,13 @@ Singleton {
     running: true
     triggeredOnStart: true
     onTriggered: root.refresh()
+  }
+
+  property Timer diskPollTimer: Timer {
+    interval: 5000
+    repeat: true
+    running: true
+    triggeredOnStart: true
+    onTriggered: root.refreshDisk()
   }
 }

@@ -59,10 +59,11 @@ BasePill {
           Text {
             anchors.centerIn: parent
             text: String(modelData)
-            color: isActive ? Theme.onPrimary : Theme.onSurface
+            // Keep inactive workspace numbers readable over translucent pills.
+            color: isActive ? Theme.onPrimary : Theme.withAlpha(Theme.surfaceText, 0.9)
             font.pixelSize: Theme.fontSizeSmall
             font.bold: isActive
-            opacity: parent.opacity > 0.6 ? 1.0 : 0.8
+            opacity: isActive ? 1.0 : 0.95
           }
 
           MouseArea {

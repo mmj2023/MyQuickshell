@@ -16,18 +16,25 @@ BasePill {
   readonly property string focusTitle: ToplevelManager.activeToplevel
     ? ToplevelManager.activeToplevel.title
     : ""
+  readonly property string cleanedTitle: root.focusTitle.trim()
 
   content: Component {
-    Text {
-      text: root.focusTitle
-      color: Theme.widgetTextColor
-      font.family: Theme.fontFamily
-      font.pixelSize: root.textSize()
-      elide: Text.ElideRight
-      wrapMode: Text.NoWrap
-      horizontalAlignment: Text.AlignHCenter
-      width: root.focusTitle === "" ? 0 : 120
-      clip: true
+    Item {
+      implicitWidth: root.cleanedTitle === "" ? 0 : Math.min(220, titleText.implicitWidth)
+      implicitHeight: titleText.implicitHeight + 2
+      Text {
+        id: titleText
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.verticalCenter: parent.verticalCenter
+        width: parent.width
+        text: root.cleanedTitle
+        color: Theme.widgetTextColor
+        font.family: Theme.fontFamily
+        font.pixelSize: root.textSize()
+        elide: Text.ElideRight
+        wrapMode: Text.NoWrap
+        horizontalAlignment: Text.AlignHCenter
+      }
     }
   }
 }

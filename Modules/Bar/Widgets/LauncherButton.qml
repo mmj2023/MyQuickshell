@@ -1,5 +1,7 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell.Io
+import Quickshell.Widgets
 import qs.Common
 import qs.Modules.Bar.Widgets
 import qs.Services
@@ -23,39 +25,20 @@ BasePill {
       implicitWidth: 28
     implicitHeight: 22
 
-    Canvas {
+    IconImage {
+      id: archLogo
       anchors.centerIn: parent
       width: 22
       height: 22
-
-      onPaint: {
-        const ctx = getContext("2d")
-        ctx.reset()
-        ctx.fillStyle = Theme.primary
-        ctx.beginPath()
-        ctx.moveTo(11, 1)
-        ctx.lineTo(2, 21)
-        ctx.lineTo(6.5, 21)
-        ctx.lineTo(8.2, 16.5)
-        ctx.lineTo(13.8, 16.5)
-        ctx.lineTo(15.5, 21)
-        ctx.lineTo(20, 21)
-        ctx.closePath()
-        ctx.fill()
-
-        ctx.fillStyle = Theme.surfaceContainer
-        ctx.beginPath()
-        ctx.moveTo(11, 8)
-        ctx.lineTo(9.3, 14)
-        ctx.lineTo(12.7, 14)
-        ctx.closePath()
-        ctx.fill()
-      }
-
-      Connections {
-        target: Theme
-        function onPrimaryChanged() { parent.requestPaint() }
-        function onSurfaceContainerChanged() { parent.requestPaint() }
+      source: "file:///usr/share/pixmaps/archlinux-logo.svg"
+      asynchronous: true
+      layer.enabled: true
+      layer.effect: MultiEffect {
+        saturation: 0
+        colorization: 1
+        colorizationColor: Theme.primary
+        brightness: 0.5
+        contrast: 1
       }
     }
     }

@@ -1,3 +1,4 @@
 .quickshell/
 *.qslog
 file:*
+*.txt

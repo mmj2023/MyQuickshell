@@ -159,6 +159,7 @@ Singleton {
   readonly property color tertiary: currentThemeData.tertiary
   readonly property color tertiaryContainer: currentThemeData.tertiaryContainer
   readonly property color error: currentThemeData.error
+  readonly property color warning: currentThemeData.warning
 
   readonly property color surface: currentThemeData.surface
   readonly property color surfaceText: currentThemeData.surfaceText

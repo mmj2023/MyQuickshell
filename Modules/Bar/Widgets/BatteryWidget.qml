@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import Quickshell.Services.UPower
 import qs.Common
 import qs.Modules.Bar.Widgets
@@ -14,6 +15,10 @@ BasePill {
 
   readonly property real level: UPower.displayDevice ? (UPower.displayDevice.percentage * 100) : -1
   readonly property bool hasBattery: level >= 0
+  property bool _notificationStateReady: false
+  property bool _previousCharging: false
+  property bool _lowNotified: false
+  property bool _fullNotified: false
 
   content: Component {
     Row {
@@ -37,13 +42,71 @@ BasePill {
     }
   }
 
-  readonly property bool _charging: UPower.displayDevice ? UPower.displayDevice.state === 1 : false
+  // Keep the charging glyph while AC power is connected, including when a
+  // charge limit leaves the battery below 100% or UPower reports full.
+  readonly property bool _charging: UPower.displayDevice ? !UPower.onBattery : false
+  readonly property bool _actuallyCharging: UPower.displayDevice
+    ? UPower.displayDevice.state === UPowerDeviceState.Charging
+    : false
   readonly property bool _low: root.hasBattery && root.level <= 20
+
+  Component.onCompleted: {
+    root._previousCharging = root._actuallyCharging
+    root._notificationStateReady = true
+  }
+
+  Timer {
+    interval: 5000
+    repeat: true
+    running: root.hasBattery
+    triggeredOnStart: true
+    onTriggered: root.checkBatteryNotifications()
+  }
+
+  function sendNotification(summary, body, urgency) {
+    Quickshell.execDetached([
+      "notify-send",
+      "-a", "MyQuickshell",
+      "-u", urgency,
+      "-i", "battery",
+      summary,
+      body
+    ])
+  }
+
+  function checkBatteryNotifications() {
+    if (!root._notificationStateReady || !root.hasBattery)
+      return
+
+    const charging = root._actuallyCharging
+    if (!charging && root.level <= 20) {
+      if (!root._lowNotified) {
+        root._lowNotified = true
+        root.sendNotification("Low Battery", "Battery is at " + Math.round(root.level) + "%.", "critical")
+      }
+    } else if (root.level > 23 || charging) {
+      root._lowNotified = false
+    }
+
+    if (root._charging && root.level >= 100) {
+      if (!root._fullNotified) {
+        root._fullNotified = true
+        root.sendNotification("Battery Full", "Battery is fully charged.", "normal")
+      }
+    } else if (root._previousCharging && !charging && root._charging) {
+      root.sendNotification("Charging Stopped", "The battery is no longer charging at " + Math.round(root.level) + "%.", "normal")
+      root._fullNotified = false
+    } else if (!charging || root.level < 97) {
+      root._fullNotified = false
+    }
+
+    root._previousCharging = charging
+  }
 
   function batteryIcon() {
     if (root._charging) {
-      if (root.level >= 90) return "battery_charging_full"
-      if (root.level >= 80) return "battery_charging_90"
+      if (root.level >= 100) return "battery_charging_full"
+      if (root.level >= 90) return "battery_charging_90"
       if (root.level >= 60) return "battery_charging_80"
       if (root.level >= 50) return "battery_charging_60"
       if (root.level >= 30) return "battery_charging_50"
