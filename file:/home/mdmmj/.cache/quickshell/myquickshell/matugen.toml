@@ -1,5 +1,0 @@
-[config]
-
-[templates.dank]
-input_path = '/home/mdmmj/Projects/projects/qml_Projects/MyQuickshell/assets/matugen/dank.json'
-output_path = 'file:///home/mdmmj/.cache/quickshell/myquickshell/dms-colors.json'
