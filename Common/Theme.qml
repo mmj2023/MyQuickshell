@@ -14,12 +14,13 @@ import qs.Services
 Singleton {
   id: root
 
-  readonly property string colorsPath: String(StandardPaths.writableLocation(StandardPaths.CacheLocation)).replace(/^file:\/\//, "") + "/myquickshell/dms-colors.json"
-
-  // Matches DMS; we only build dark for now but the palette supports both modes.
-  readonly property bool isLightMode: false
+  // DMS is the source of truth for the active wallpaper-derived palette.
+  // Reading its canonical cache keeps this shell in sync when DMS regenerates
+  // colors after a wallpaper or Matugen setting change.
+  readonly property string colorsPath: String(StandardPaths.writableLocation(StandardPaths.GenericCacheLocation)).replace(/^file:\/\//, "") + "/DankMaterialShell/dms-colors.json"
 
   property var matugenColors: ({})
+  readonly property bool isLightMode: String(matugenColors.mode || "dark") === "light"
 
   FileView {
     id: colorsFile
@@ -35,6 +36,7 @@ Singleton {
         root.matugenColors = ({})
       }
     }
+    onFileChanged: colorsFile.reload()
   }
 
   // Instantiate and drive MatugenService. Referencing it here (Theme is always
@@ -109,7 +111,7 @@ Singleton {
     "secondaryContainer": getMatugenColor("secondary_container", getMatugenColor("surface_container_high", "#272b2a")),
     "tertiary": getMatugenColor("tertiary", "#d8bbf8"),
     "tertiaryContainer": getMatugenColor("tertiary_container", getMatugenColor("surface_container_high", "#272b2a")),
-    "surface": getMatugenColor("surface", "#101414"),
+    "surface": getMatugenColor("surface", getMatugenColor("background", "#101414")),
     "surfaceText": getMatugenColor("on_background", "#e0e3e2"),
     "surfaceVariant": getMatugenColor("surface_variant", "#3e4948"),
     "surfaceVariantText": getMatugenColor("on_surface_variant", "#bec9c7"),
@@ -122,7 +124,12 @@ Singleton {
     "surfaceContainer": getMatugenColor("surface_container", "#1c2020"),
     "surfaceContainerHigh": getMatugenColor("surface_container_high", "#272b2a"),
     "surfaceContainerHighest": getMatugenColor("surface_container_highest", "#313635"),
-    "error": getMatugenColor("error", "#ffb4ab")
+    "surfaceBright": getMatugenColor("surface_bright", "#313635"),
+    "surfaceDim": getMatugenColor("surface_dim", "#101414"),
+    "error": getMatugenColor("error", "#ffb4ab"),
+    "warning": "#ff9800",
+    "info": "#2196f3",
+    "success": "#4caf50"
   }
 
   // ---- color tokens (from currentThemeData so mapping is DMS-identical) ----
@@ -153,15 +160,23 @@ Singleton {
   readonly property color surfaceContainer: currentThemeData.surfaceContainer
   readonly property color surfaceContainerHigh: currentThemeData.surfaceContainerHigh
   readonly property color surfaceContainerHighest: currentThemeData.surfaceContainerHighest
+  readonly property color surfaceBright: currentThemeData.surfaceBright
+  readonly property color surfaceDim: currentThemeData.surfaceDim
 
   readonly property color inverseSurface: getMatugenColor("inverse_surface", "#e0e3e2")
   readonly property color inversePrimary: getMatugenColor("inverse_primary", "#056a66")
   readonly property color shadow: Qt.rgba(0, 0, 0, 0.4)
+  readonly property color scrim: getMatugenColor("scrim", "#000000")
 
   readonly property color surfaceTextHover: withAlpha(surfaceText, 0.08)
   readonly property color surfaceText_8: withAlpha(surfaceText, 0.08)
   readonly property color surfaceText_12: withAlpha(surfaceText, 0.12)
   readonly property color surfaceText_38: withAlpha(surfaceText, 0.38)
+  readonly property color primaryHover: withAlpha(primary, 0.12)
+  readonly property color primaryPressed: withAlpha(primary, 0.16)
+  readonly property color surfaceHover: withAlpha(surfaceVariant, 0.08)
+  readonly property color surfacePressed: withAlpha(surfaceVariant, 0.12)
+  readonly property color surfaceSelected: withAlpha(surfaceVariant, 0.15)
 
   // ---- widget background (reads SettingsData like DMS) ---------------------
   property var widgetBaseBackgroundColor: {

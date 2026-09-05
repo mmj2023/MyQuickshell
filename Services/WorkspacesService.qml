@@ -24,6 +24,12 @@ QtObject {
 
   // Active workspace id per monitor name, refreshed from hyprctl.
   property var activeByMonitor: ({})
+  readonly property string desktop: (Quickshell.env("XDG_CURRENT_DESKTOP") || Quickshell.env("DESKTOP_SESSION") || "").toLowerCase()
+  readonly property string backend: desktop.indexOf("niri") !== -1 ? "niri"
+    : (desktop.indexOf("hypr") !== -1 ? "hyprland"
+    : (desktop.indexOf("mango") !== -1 ? "mango"
+    : (desktop.indexOf("dwl") !== -1 ? "dwl"
+    : (desktop.indexOf("labwc") !== -1 ? "labwc" : "hyprland"))))
 
   function activeWorkspaceId(monitorName) {
     var v = activeByMonitor[monitorName]
@@ -90,8 +96,22 @@ QtObject {
 
   function switchTo(id) {
     if (!id) return
-    switchProc.command = ["hyprctl", "dispatch", "workspace", String(id)]
+    switchProc.command = switchCommand(id)
     switchProc.running = true
+  }
+
+  function switchCommand(id) {
+    const workspace = String(id)
+    switch (root.backend) {
+    case "niri": return ["niri", "msg", "action", "focus-workspace", workspace]
+    case "mango": return ["mmsg", "-d", "workspace", workspace]
+    case "dwl": return ["dwlmsg", "-s", "view", workspace]
+    case "labwc": return ["wlrctl", "window", "switch-to-workspace", workspace]
+    // Hyprland 0.56+ exposes dispatchers through its Lua API. Keep the
+    // command as one argument so hyprctl does not parse the workspace number
+    // as a Lua token.
+    default: return ["hyprctl", "dispatch", "hl.dsp.focus({ workspace = " + workspace + " })"]
+    }
   }
 
   property Process switchProc: Process {

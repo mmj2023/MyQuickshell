@@ -24,8 +24,9 @@ BasePill {
       font.family: Theme.fontFamily
       font.pixelSize: root.textSize()
       elide: Text.ElideRight
+      wrapMode: Text.NoWrap
       horizontalAlignment: Text.AlignHCenter
-      width: root.focusTitle === "" ? 0 : 160
+      width: root.focusTitle === "" ? 0 : 120
       clip: true
     }
   }

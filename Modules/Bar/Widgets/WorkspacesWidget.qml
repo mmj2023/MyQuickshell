@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell.Io
 import qs.Common
 import qs.Modules.Bar.Widgets
 import qs.Services
@@ -65,12 +66,31 @@ BasePill {
           }
 
           MouseArea {
+            z: 1
             anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            preventStealing: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: WorkspacesService.switchTo(modelData)
+            onClicked: function(mouse) {
+              mouse.accepted = true
+              root.switchToWorkspace(Number(modelData), switchProcess)
+            }
+          }
+
+          Process {
+            id: switchProcess
+            command: WorkspacesService.switchCommand(Number(modelData))
           }
         }
       }
     }
+  }
+
+  function switchToWorkspace(workspaceId, process) {
+    const id = Number(workspaceId)
+    if (!Number.isFinite(id) || id < 1) return
+    console.log("Switching to workspace", id)
+    process.command = WorkspacesService.switchCommand(id)
+    process.running = true
   }
 }
