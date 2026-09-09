@@ -10,5 +10,6 @@ FocusedWindowWidget 1.0 FocusedWindowWidget.qml
 LauncherButton 1.0 LauncherButton.qml
 RamWidget 1.0 RamWidget.qml
 RunningAppsWidget 1.0 RunningAppsWidget.qml
+SubmapWidget 1.0 SubmapWidget.qml
 SystemTrayWidget 1.0 SystemTrayWidget.qml
 WorkspacesWidget 1.0 WorkspacesWidget.qml

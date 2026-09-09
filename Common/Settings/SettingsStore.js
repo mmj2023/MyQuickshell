@@ -62,6 +62,22 @@ function migrateToVersion(obj, targetVersion) {
             });
             settings.barRightWidgets = migratedWidgets;
         }
+        if (currentVersion < 3) {
+            var leftWidgets = settings.barLeftWidgets;
+            if (Array.isArray(leftWidgets) && !leftWidgets.some(function(widget) {
+                return widget && widget.id === "submap";
+            })) {
+                var migratedLeftWidgets = leftWidgets.slice();
+                var launcherIndex = migratedLeftWidgets.findIndex(function(widget) {
+                    return widget && widget.id === "launcherButton";
+                });
+                migratedLeftWidgets.splice(launcherIndex >= 0 ? launcherIndex + 1 : 0, 0, {
+                    id: "submap",
+                    enabled: true
+                });
+                settings.barLeftWidgets = migratedLeftWidgets;
+            }
+        }
     }
     settings.configVersion = targetVersion;
     return settings;

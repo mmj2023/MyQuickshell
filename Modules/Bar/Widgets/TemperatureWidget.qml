@@ -6,6 +6,8 @@ import qs.Services
 BasePill {
   id: root
 
+  property QtObject barWindow: null
+  property QtObject parentScreen: null
   property bool showLabel: false
 
   content: Component {

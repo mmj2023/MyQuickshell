@@ -14,7 +14,7 @@ import "Settings/SpecUtil.js" as Util
 Singleton {
   id: root
 
-  readonly property int settingsConfigVersion: 2
+  readonly property int settingsConfigVersion: 3
   readonly property string _configDir: StandardPaths.writableLocation(StandardPaths.ConfigLocation) + "/myquickshell"
   readonly property string settingsPath: _configDir + "/settings.json"
 
@@ -22,6 +22,8 @@ Singleton {
   property bool _selfWrite: false
   property bool _hasLoaded: false
   property bool _parseError: false
+  property bool _configDirReady: false
+  property bool _savePending: false
 
   // ---- declarative spec keys become live properties ----------------------
   // Initialised to SPEC defaults so the shell is visible before settings.json loads.
@@ -107,7 +109,7 @@ Singleton {
   function loadSettings() {
     _loading = true
     try {
-      const txt = root._file.text()
+      const txt = _file.text()
       let obj = (txt && txt.trim()) ? JSON.parse(txt) : null
       if (obj && (obj.configVersion || 0) < settingsConfigVersion) {
         obj = Store.migrateToVersion(obj, settingsConfigVersion) || obj
@@ -137,6 +139,9 @@ Singleton {
     } finally {
       _loading = false
     }
+    // Materialize the settings file on first launch so subsequent changes,
+    // including hidden tray IDs, are written through an existing FileView.
+    saveSettings()
   }
 
   function _applyOnLoad() {
@@ -146,9 +151,30 @@ Singleton {
   function saveSettings() {
     if (_loading || _parseError || !_hasLoaded) return
     if (!_file) return
+    _savePending = true
+    if (!_configDirReady) {
+      if (!configDirProc.running)
+        configDirProc.running = true
+      return
+    }
+    _savePending = false
     _selfWrite = true
-    root._file.setText(JSON.stringify(Store.toJson(root), null, 2))
+    _file.setText(JSON.stringify(Store.toJson(root), null, 2))
     _selfWrite = false
+  }
+
+  Process {
+    id: configDirProc
+    command: ["mkdir", "-p", root._configDir]
+    onExited: function(status, exitStatus) {
+      if (status !== 0) {
+        console.error("Failed to create settings directory with status " + status)
+        return
+      }
+      root._configDirReady = true
+      if (root._savePending)
+        root.saveSettings()
+    }
   }
 
   FileView {

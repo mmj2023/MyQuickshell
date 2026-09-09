@@ -18,6 +18,7 @@ Item {
   readonly property int innerPadding: typeof SettingsData !== "undefined" ? SettingsData.barInnerPadding : 0
 
   Component { id: launcherButtonComp; LauncherButton {} }
+  Component { id: submapComp; SubmapWidget {} }
   Component { id: workspaceSwitcherComp; WorkspacesWidget {} }
   Component { id: runningAppsComp; RunningAppsWidget {} }
   Component { id: focusedWindowComp; FocusedWindowWidget {} }
@@ -32,6 +33,7 @@ Item {
   function registryFor(id) {
     switch (id) {
     case "launcherButton": return launcherButtonComp
+    case "submap": return submapComp
     case "workspaceSwitcher": return workspaceSwitcherComp
     case "runningApps": return runningAppsComp
     case "focusedWindow": return focusedWindowComp

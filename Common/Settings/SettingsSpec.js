@@ -38,6 +38,7 @@ var SPEC = {
     barLeftWidgets: {
         def: [
             { id: "launcherButton", enabled: true },
+            { id: "submap", enabled: true },
             { id: "workspaceSwitcher", enabled: true },
             { id: "runningApps", enabled: true },
             { id: "focusedWindow", enabled: true }

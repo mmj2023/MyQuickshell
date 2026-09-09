@@ -98,9 +98,23 @@ BasePill {
           property bool hovered: false
 
           IconImage {
+            id: trayIcon
             anchors.centerIn: parent
             source: root._iconOf(item)
-            implicitSize: 18
+            width: 18
+            height: 18
+            asynchronous: true
+            smooth: true
+            mipmap: true
+            visible: status === Image.Ready
+          }
+
+          Text {
+            anchors.centerIn: parent
+            visible: !trayIcon.visible
+            text: root._fallbackLabel(item)
+            color: Theme.widgetTextColor
+            font.pixelSize: 10
           }
 
           MouseArea {
@@ -208,6 +222,13 @@ BasePill {
     return _iconSource(item && item.icon)
   }
 
+  function _fallbackLabel(item) {
+    if (!item)
+      return "?"
+    const itemId = String(item.id || "").trim()
+    return itemId === "" ? "?" : itemId.charAt(0).toUpperCase()
+  }
+
   function _iconSource(icon) {
     if (!icon)
       return ""
@@ -304,9 +325,23 @@ BasePill {
             color: hiddenMouse.containsMouse ? Theme.surfaceText_12 : "transparent"
 
             IconImage {
+              id: hiddenTrayIcon
               anchors.centerIn: parent
               source: root._iconOf(modelData)
-              implicitSize: 18
+              width: 18
+              height: 18
+              asynchronous: true
+              smooth: true
+              mipmap: true
+              visible: status === Image.Ready
+            }
+
+            Text {
+              anchors.centerIn: parent
+              visible: !hiddenTrayIcon.visible
+              text: root._fallbackLabel(modelData)
+              color: Theme.widgetTextColor
+              font.pixelSize: 10
             }
 
             MouseArea {

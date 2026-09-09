@@ -17,6 +17,8 @@ BasePill {
     ? ToplevelManager.activeToplevel.title
     : ""
   readonly property string cleanedTitle: root.focusTitle.trim()
+  visible: root.cleanedTitle !== ""
+  width: root.cleanedTitle === "" ? 0 : root.visualWidth
 
   content: Component {
     Item {

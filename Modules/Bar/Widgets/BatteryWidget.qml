@@ -52,7 +52,6 @@ BasePill {
 
   Component.onCompleted: {
     root._previousCharging = root._actuallyCharging
-    root._notificationStateReady = true
   }
 
   Timer {
@@ -75,10 +74,19 @@ BasePill {
   }
 
   function checkBatteryNotifications() {
-    if (!root._notificationStateReady || !root.hasBattery)
+    if (!root.hasBattery)
       return
 
     const charging = root._actuallyCharging
+    // UPower can briefly expose a zero percentage while the device is being
+    // initialized after the shell starts. Establish the first complete
+    // sample as the baseline instead of notifying from that transient value.
+    if (!root._notificationStateReady) {
+      root._previousCharging = charging
+      root._notificationStateReady = true
+      return
+    }
+
     if (!charging && root.level <= 20) {
       if (!root._lowNotified) {
         root._lowNotified = true
