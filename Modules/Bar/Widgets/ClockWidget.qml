@@ -24,13 +24,23 @@ BasePill {
         font.bold: true
       }
 
-      Text {
+      Row {
         anchors.horizontalCenter: parent.horizontalCenter
-        text: ClockService.dateString
-        color: Theme.widgetInactiveIconColor
-        font.family: Theme.monoFontFamily
-        font.pixelSize: Math.round(root.textSize() * 0.7)
-        horizontalAlignment: Text.AlignHCenter
+        spacing: 6
+
+        Text {
+          text: ClockService.dateString
+          color: Theme.widgetInactiveIconColor
+          font.family: Theme.monoFontFamily
+          font.pixelSize: Math.round(root.textSize() * 0.7)
+        }
+
+        Text {
+          text: ClockService.weekdayString
+          color: Theme.widgetInactiveIconColor
+          font.family: Theme.monoFontFamily
+          font.pixelSize: Math.round(root.textSize() * 0.7)
+        }
       }
     }
   }

@@ -79,6 +79,22 @@ function migrateToVersion(obj, targetVersion) {
             }
         }
     }
+    if (currentVersion < 4) {
+        var centerWidgets = settings.barCenterWidgets;
+        if (Array.isArray(centerWidgets) && !centerWidgets.some(function(widget) {
+            return widget && widget.id === "player";
+        })) {
+            var migratedCenterWidgets = centerWidgets.slice();
+            var clockIndex = migratedCenterWidgets.findIndex(function(widget) {
+                return widget && widget.id === "clock";
+            });
+            migratedCenterWidgets.splice(clockIndex >= 0 ? clockIndex : migratedCenterWidgets.length, 0, {
+                id: "player",
+                enabled: true
+            });
+            settings.barCenterWidgets = migratedCenterWidgets;
+        }
+    }
     settings.configVersion = targetVersion;
     return settings;
 }

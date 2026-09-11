@@ -15,29 +15,79 @@ BasePill {
 
   readonly property real level: UPower.displayDevice ? (UPower.displayDevice.percentage * 100) : -1
   readonly property bool hasBattery: level >= 0
+  readonly property var accessoryDevices: {
+    if (!UPower.devices)
+      return []
+
+    const accessoryTypes = [
+      UPowerDeviceType.BluetoothGeneric,
+      UPowerDeviceType.Headphones,
+      UPowerDeviceType.Headset,
+      UPowerDeviceType.Keyboard,
+      UPowerDeviceType.Mouse,
+      UPowerDeviceType.Speakers,
+      UPowerDeviceType.Touchpad,
+      UPowerDeviceType.GamingInput
+    ]
+    return UPower.devices.values.filter(device =>
+      device && device.ready && !device.isLaptopBattery &&
+      accessoryTypes.includes(device.type) && device.percentage >= 0)
+  }
   property bool _notificationStateReady: false
   property bool _previousCharging: false
   property bool _lowNotified: false
   property bool _fullNotified: false
+  property var _accessoryNotificationStates: ({})
 
   content: Component {
     Row {
-      visible: root.hasBattery
+      visible: root.hasBattery || root.accessoryDevices.length > 0
       spacing: 4
 
-      DmsIcon {
-        name: root.batteryIcon()
-        size: root.iconSize(-4)
-        color: root._charging ? Theme.primary : (root._low ? Theme.error : Theme.widgetIconColor)
-        anchors.verticalCenter: parent.verticalCenter
+      Row {
+        visible: root.hasBattery
+        spacing: 4
+
+        DmsIcon {
+          name: root.batteryIcon()
+          size: root.iconSize(-4)
+          color: root._charging ? Theme.primary : (root._low ? Theme.error : Theme.widgetIconColor)
+          anchors.verticalCenter: parent.verticalCenter
+        }
+
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          text: Math.round(root.level) + "%"
+          color: root._low ? Theme.error : Theme.widgetTextColor
+          font.family: Theme.monoFontFamily
+          font.pixelSize: root.textSize()
+        }
       }
 
-      Text {
-        anchors.verticalCenter: parent.verticalCenter
-        text: Math.round(root.level) + "%"
-        color: root._low ? Theme.error : Theme.widgetTextColor
-        font.family: Theme.monoFontFamily
-        font.pixelSize: root.textSize()
+      Repeater {
+        model: root.accessoryDevices
+
+        delegate: Row {
+          required property var modelData
+          spacing: 4
+
+          DmsIcon {
+            name: root.accessoryIcon(modelData)
+            size: root.iconSize(-4)
+            color: modelData.state === UPowerDeviceState.Charging
+              ? Theme.primary
+              : (root.accessoryLevel(modelData) <= 20 ? Theme.error : Theme.widgetIconColor)
+            anchors.verticalCenter: parent.verticalCenter
+          }
+
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.accessoryLevel(modelData) + "%"
+            color: root.accessoryLevel(modelData) <= 20 ? Theme.error : Theme.widgetTextColor
+            font.family: Theme.monoFontFamily
+            font.pixelSize: root.textSize()
+          }
+        }
       }
     }
   }
@@ -57,25 +107,31 @@ BasePill {
   Timer {
     interval: 5000
     repeat: true
-    running: root.hasBattery
+    running: root.hasBattery || root.accessoryDevices.length > 0
     triggeredOnStart: true
     onTriggered: root.checkBatteryNotifications()
   }
 
   function sendNotification(summary, body, urgency) {
+    sendDeviceNotification(summary, body, urgency, "battery")
+  }
+
+  function sendDeviceNotification(summary, body, urgency, icon) {
     Quickshell.execDetached([
       "notify-send",
       "-a", "MyQuickshell",
       "-u", urgency,
-      "-i", "battery",
+      "-i", icon,
       summary,
       body
     ])
   }
 
   function checkBatteryNotifications() {
-    if (!root.hasBattery)
+    if (!root.hasBattery) {
+      root.checkAccessoryNotifications()
       return
+    }
 
     const charging = root._actuallyCharging
     // UPower can briefly expose a zero percentage while the device is being
@@ -109,6 +165,75 @@ BasePill {
     }
 
     root._previousCharging = charging
+    root.checkAccessoryNotifications()
+  }
+
+  function checkAccessoryNotifications() {
+    const activePaths = {}
+
+    for (const device of root.accessoryDevices) {
+      const key = device.nativePath || device.model || String(device.type)
+      const level = root.accessoryLevel(device)
+      const charging = device.state === UPowerDeviceState.Charging
+      const previous = root._accessoryNotificationStates[key] || {
+        charging: charging,
+        lowNotified: false,
+        fullNotified: false
+      }
+
+      activePaths[key] = true
+
+      if (!previous.charging && charging)
+        previous.fullNotified = false
+
+      if (!charging && level <= 20) {
+        if (!previous.lowNotified) {
+          previous.lowNotified = true
+          root.sendDeviceNotification(
+            "Low Battery",
+            root.accessoryName(device) + " is at " + level + "%.",
+            "critical",
+            root.accessoryIcon(device)
+          )
+        }
+      } else if (level > 23 || charging) {
+        previous.lowNotified = false
+      }
+
+      if (charging && level >= 100) {
+        if (!previous.fullNotified) {
+          previous.fullNotified = true
+          root.sendDeviceNotification(
+            "Battery Full",
+            root.accessoryName(device) + " is fully charged.",
+            "normal",
+            root.accessoryIcon(device)
+          )
+        }
+      } else if (previous.charging && !charging) {
+        root.sendDeviceNotification(
+          "Charging Stopped",
+          root.accessoryName(device) + " is no longer charging at " + level + "%.",
+          "normal",
+          root.accessoryIcon(device)
+        )
+        previous.fullNotified = false
+      } else if (!charging || level < 97) {
+        previous.fullNotified = false
+      }
+
+      previous.charging = charging
+      root._accessoryNotificationStates[key] = previous
+    }
+
+    for (const key in root._accessoryNotificationStates) {
+      if (!activePaths[key])
+        delete root._accessoryNotificationStates[key]
+    }
+  }
+
+  function accessoryName(device) {
+    return device.model || UPowerDeviceType.toString(device.type)
   }
 
   function batteryIcon() {
@@ -129,5 +254,33 @@ BasePill {
     if (root.level >= 40) return "battery_3_bar"
     if (root.level >= 25) return "battery_2_bar"
     return "battery_1_bar"
+  }
+
+  function accessoryLevel(device) {
+    return Math.round(device.percentage * 100)
+  }
+
+  function accessoryIcon(device) {
+    if (device.state === UPowerDeviceState.Charging)
+      return "battery_charging_full"
+
+    switch (device.type) {
+    case UPowerDeviceType.Keyboard:
+      return "keyboard"
+    case UPowerDeviceType.Mouse:
+    case UPowerDeviceType.Touchpad:
+      return "mouse"
+    case UPowerDeviceType.Headset:
+    case UPowerDeviceType.Headphones:
+      return "headphones"
+    case UPowerDeviceType.Speakers:
+      return "speaker"
+    case UPowerDeviceType.GamingInput:
+      return "gamepad"
+    case UPowerDeviceType.BluetoothGeneric:
+      return "bluetooth"
+    default:
+      return "battery_std"
+    }
   }
 }

@@ -46,6 +46,7 @@ var SPEC = {
     },
     barCenterWidgets: {
         def: [
+            { id: "player", enabled: true },
             { id: "clock", enabled: true },
             { id: "weather", enabled: true }
         ]

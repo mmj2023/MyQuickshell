@@ -7,6 +7,7 @@ QtObject {
   id: root
 
   property string dateString: ""
+  property string weekdayString: ""
   property string timeString: ""
 
   readonly property bool showSeconds: false
@@ -31,5 +32,8 @@ QtObject {
     var mo  = (now.getMonth() + 1).toString().padStart(2, "0")
     var day = now.getDate().toString().padStart(2, "0")
     dateString = yr + "-" + mo + "-" + day
+
+    var weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    weekdayString = weekdays[now.getDay()]
   }
 }

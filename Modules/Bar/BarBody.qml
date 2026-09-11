@@ -22,6 +22,7 @@ Item {
   Component { id: workspaceSwitcherComp; WorkspacesWidget {} }
   Component { id: runningAppsComp; RunningAppsWidget {} }
   Component { id: focusedWindowComp; FocusedWindowWidget {} }
+  Component { id: playerComp; PlayerWidget {} }
   Component { id: clockComp; ClockWidget {} }
   Component { id: systemTrayComp; SystemTrayWidget {} }
   Component { id: cpuUsageComp; CpuWidget {} }
@@ -37,6 +38,7 @@ Item {
     case "workspaceSwitcher": return workspaceSwitcherComp
     case "runningApps": return runningAppsComp
     case "focusedWindow": return focusedWindowComp
+    case "player": return playerComp
     case "clock": return clockComp
     case "systemTray": return systemTrayComp
     case "cpuUsage": return cpuUsageComp
@@ -57,7 +59,8 @@ Item {
       if (!entry || entry.enabled !== true) continue
       var comp = root.registryFor(entry.id)
       if (comp === null) { console.error("MQBAR skip (no comp):", entry.id); continue }
-      var obj = comp.createObject(hostRow, {
+      var targetRow = entry.id === "player" ? playerRow : hostRow
+      var obj = comp.createObject(targetRow, {
         "screen": root.screen,
         "parentScreen": root.screen,
         "barWindow": root.barWindow
@@ -101,6 +104,14 @@ Item {
   Row {
     id: centerRow
     anchors.horizontalCenter: parent.horizontalCenter
+    anchors.verticalCenter: parent.verticalCenter
+    spacing: root.spacing
+  }
+
+  Row {
+    id: playerRow
+    anchors.right: centerRow.left
+    anchors.rightMargin: root.spacing
     anchors.verticalCenter: parent.verticalCenter
     spacing: root.spacing
   }
