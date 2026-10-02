@@ -110,10 +110,13 @@ BasePill {
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
           onClicked: {
-            var globalPos = weatherClickArea.mapToGlobal(0, 0)
-            var centerX = globalPos.x + weatherClickArea.width / 2
-            var topY = globalPos.y
-            weatherOverlay.toggle(centerX, topY)
+            if (!root.barWindow)
+              return
+            const localPos = weatherClickArea.mapToItem(root.barWindow.contentItem, 0, 0)
+            weatherOverlay.toggle(
+              localPos.x + weatherClickArea.width / 2,
+              root.barWindow.height
+            )
           }
         }
       }

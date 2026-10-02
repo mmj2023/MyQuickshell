@@ -23,6 +23,9 @@ Singleton {
   property int refCount: 0
   property int lastFetchTime: 0
   property int retryAttempts: 0
+  property var locationSuggestions: []
+  property int _locationSearchSerial: 0
+  property string _locationSearchQuery: ""
   readonly property int _minFetchInterval: 30000
 
   readonly property var _dayIcons: ({
@@ -211,6 +214,33 @@ Singleton {
     geocodeFetcher.running = true
   }
 
+  function searchLocations(query) {
+    root._locationSearchQuery = String(query || "").trim()
+    root._locationSearchSerial++
+    root.locationSuggestions = []
+    if (root._locationSearchQuery.length < 2 || root._locationSearchQuery.indexOf(",") >= 0)
+      return
+    locationSearchDelay.restart()
+  }
+
+  function receiveLocationSearch(text, serial) {
+    if (serial !== root._locationSearchSerial)
+      return
+    try {
+      const response = JSON.parse(text.trim())
+      root.locationSuggestions = (response.results || []).slice(0, 5).map(result => ({
+        name: result.name || "",
+        admin1: result.admin1 || "",
+        country: result.country || "",
+        latitude: result.latitude,
+        longitude: result.longitude
+      }))
+    } catch (error) {
+      console.warn("WeatherService: invalid location search response:", error)
+      root.locationSuggestions = []
+    }
+  }
+
   function fetchWeather(lat, lon) {
     if (refCount===0) return
     if (lat==null) {
@@ -274,6 +304,49 @@ Singleton {
           root.fetchWeather()
         } catch(e) { root.lastFetchError = "Geocoding failed: "+String(e) }
       }
+    }
+  }
+
+  Timer {
+    id: locationSearchDelay
+    interval: 300
+    repeat: false
+    onTriggered: {
+      if (root._locationSearchQuery.length < 2 || root._locationSearchQuery.indexOf(",") >= 0)
+        return
+      if (locationSearchFetcher.running) {
+        locationSearchDelay.restart()
+        return
+      }
+      root._activeLocationSearchSerial = root._locationSearchSerial
+      locationSearchFetcher.command = [
+        "curl", "-fsS", "--max-time", "8", "--get",
+        "--data-urlencode", "name=" + root._locationSearchQuery,
+        "--data-urlencode", "count=5",
+        "--data-urlencode", "language=en",
+        "--data-urlencode", "format=json",
+        "https://geocoding-api.open-meteo.com/v1/search"
+      ]
+      locationSearchFetcher.running = true
+    }
+  }
+
+  property int _activeLocationSearchSerial: 0
+
+  Process {
+    id: locationSearchFetcher
+    running: false
+    command: []
+    stdout: StdioCollector {
+      onStreamFinished: root.receiveLocationSearch(text, root._activeLocationSearchSerial)
+    }
+    onExited: function(exitCode) {
+      if (exitCode !== 0 && root._activeLocationSearchSerial === root._locationSearchSerial) {
+        console.warn("WeatherService: location search failed with exit code", exitCode)
+        root.locationSuggestions = []
+      }
+      if (root._activeLocationSearchSerial !== root._locationSearchSerial)
+        locationSearchDelay.restart()
     }
   }
 

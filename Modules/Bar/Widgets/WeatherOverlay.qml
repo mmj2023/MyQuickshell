@@ -7,52 +7,73 @@ import qs.Services
 import qs.Modules.Bar.Widgets
 
 // Weather overview popup. Opened by ClockWidget when the user clicks the temp.
-// Positioned above the bar. Contains current conditions, metrics, 7-day and
+// Positioned below the bar to avoid covering its widgets. Contains conditions, metrics, 7-day and
 // hourly forecast lists, and an inline location settings row.
-FloatingWindow {
+PopupWindow {
   id: root
 
   property var barWindow: null
-  property real anchorX: 0   // global X of click point
-  property real anchorY: 0   // top of bar (global)
+  property real anchorX: 0
+  property real anchorY: 0
 
+  anchor.window: root.barWindow
+  anchor.rect.x: Math.max(8, Math.min(
+    (root.barWindow ? root.barWindow.width : Screen.width) - implicitWidth - 8,
+    root.anchorX - implicitWidth / 2
+  ))
+  anchor.rect.y: root.anchorY + 4
   visible: false
+  grabFocus: true
+  color: "transparent"
+  surfaceFormat.opaque: false
   implicitWidth: 520
   implicitHeight: column.implicitHeight + 32
 
-  // Re-position whenever the window becomes visible or anchor changes
-  onVisibleChanged: if (visible) _reposition()
-  onAnchorXChanged: _reposition()
-  onAnchorYChanged: _reposition()
+  readonly property var locationSuggestions: WeatherService.locationSuggestions
 
-  function _reposition() {
-    const wx = Math.max(8, Math.min(anchorX - implicitWidth/2, (Screen.width||1920) - implicitWidth - 8))
-    x = wx
-    y = anchorY - implicitHeight - 4
+  onVisibleChanged: {
+    if (visible) {
+      WeatherService.addRef()
+      Qt.callLater(function() { locInput.forceActiveFocus() })
+    } else {
+      WeatherService.removeRef()
+      WeatherService.searchLocations("")
+    }
   }
 
   function toggle(ax, ay) {
     anchorX = ax; anchorY = ay
     visible = !visible
-    if (visible) WeatherService.addRef()
-    else WeatherService.removeRef()
   }
 
+  function close() {
+    visible = false
+  }
 
-  // Close when clicking outside
-  MouseArea {
-    anchors.fill: parent
-    propagateComposedEvents: true
-    onPressed: function(e) { e.accepted = false }
+  function searchLocations(query) {
+    WeatherService.searchLocations(query)
+  }
+
+  function selectLocation(location) {
+    if (!location || !Number.isFinite(Number(location.latitude)) ||
+        !Number.isFinite(Number(location.longitude)))
+      return
+    WeatherService.searchLocations("")
+    locInput.text = ""
+    SettingsData.set("weatherCoordinates", location.latitude + "," + location.longitude)
+    SettingsData.set("weatherLocation", location.name)
+    WeatherService.updateLocation()
   }
 
   Rectangle {
     id: popupBg
     anchors.fill: parent
     radius: Theme.cornerRadius
-    color: Theme.withAlpha(Theme.surfaceContainer, 0.95)
-    border.color: Theme.withAlpha(Theme.outline, 0.3)
-    border.width: 1
+    color: Theme.withAlpha(
+      Theme.widgetBaseBackgroundColor,
+      typeof SettingsData !== "undefined" ? SettingsData.barWidgetTransparency : 0.65
+    )
+    border.width: 0
 
     Column {
       id: column
@@ -286,14 +307,15 @@ FloatingWindow {
       // ---- Location settings row -------------------------------------------
       Rectangle {
         width: parent.width
-        height: locRow.implicitHeight + 12
+        height: locRow.implicitHeight + 12 +
+          (root.locationSuggestions.length > 0 ? Math.min(160, root.locationSuggestions.length * 32) + 8 : 0)
         radius: Theme.cornerRadius
         color: Theme.withAlpha(Theme.surfaceContainerHigh, 0.4)
 
         Row {
           id: locRow
-          anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter }
-          anchors.leftMargin: 10; anchors.rightMargin: 10
+          anchors { left: parent.left; right: parent.right; top: parent.top }
+          anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 6
           spacing: 8
 
           DmsIcon {
@@ -314,6 +336,7 @@ FloatingWindow {
             TextInput {
               id: locInput
               anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
+              focus: true
               verticalAlignment: TextInput.AlignVCenter
               color: Theme.surfaceText
               font.family: Theme.fontFamily
@@ -327,6 +350,7 @@ FloatingWindow {
                 color: Theme.withAlpha(Theme.surfaceText, 0.35)
                 font: locInput.font
               }
+              onTextChanged: root.searchLocations(text)
               onAccepted: applyLocation()
             }
           }
@@ -379,6 +403,48 @@ FloatingWindow {
               }
             }
           }
+
+        }
+
+          ListView {
+            id: locationSuggestionList
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: 34
+            anchors.rightMargin: 156
+            anchors.top: locRow.bottom
+            anchors.topMargin: 6
+            height: Math.min(160, contentHeight)
+            visible: root.locationSuggestions.length > 0
+            clip: true
+            model: root.locationSuggestions
+            delegate: Rectangle {
+              required property var modelData
+              width: locationSuggestionList.width
+              height: 32
+              radius: 5
+              color: suggestionMouse.containsMouse ? Theme.withAlpha(Theme.primary, 0.16) : "transparent"
+
+              Text {
+                anchors.fill: parent
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+                text: [modelData.name, modelData.admin1, modelData.country].filter(Boolean).join(", ")
+                color: Theme.surfaceText
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+              }
+
+              MouseArea {
+                id: suggestionMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.selectLocation(modelData)
+              }
+            }
         }
       }
 
