@@ -27,9 +27,11 @@ PopupWindow {
   color: "transparent"
   surfaceFormat.opaque: false
   implicitWidth: 520
-  implicitHeight: column.implicitHeight + 32
+  implicitHeight: column.implicitHeight + 32 +
+    (locationSuggestions.length > 0 ? Math.min(160, locationSuggestionList.contentHeight) + 16 : 0)
 
   readonly property var locationSuggestions: WeatherService.locationSuggestions
+  readonly property bool locationSearchPending: WeatherService.locationSearchPending
 
   onVisibleChanged: {
     if (visible) {
@@ -306,9 +308,9 @@ PopupWindow {
 
       // ---- Location settings row -------------------------------------------
       Rectangle {
+        id: locationSettingsCard
         width: parent.width
-        height: locRow.implicitHeight + 12 +
-          (root.locationSuggestions.length > 0 ? Math.min(160, root.locationSuggestions.length * 32) + 8 : 0)
+        height: locRow.implicitHeight + 12
         radius: Theme.cornerRadius
         color: Theme.withAlpha(Theme.surfaceContainerHigh, 0.4)
 
@@ -406,17 +408,31 @@ PopupWindow {
 
         }
 
+        Rectangle {
+          id: suggestionsBackground
+          x: 34
+          y: locRow.height + 12
+          width: locationSettingsCard.width - 190
+          height: Math.min(160, locationSuggestionList.contentHeight) + 8
+          radius: Theme.cornerRadius
+          z: 10
+          visible: root.locationSuggestions.length > 0
+          opacity: root.locationSearchPending ? 0.72 : 1
+          color: Theme.withAlpha(
+            Theme.widgetBaseBackgroundColor,
+            typeof SettingsData !== "undefined" ? SettingsData.barWidgetTransparency : 0.65
+          )
+          Behavior on opacity {
+            NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+          }
+
           ListView {
             id: locationSuggestionList
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.leftMargin: 34
-            anchors.rightMargin: 156
-            anchors.top: locRow.bottom
-            anchors.topMargin: 6
-            height: Math.min(160, contentHeight)
-            visible: root.locationSuggestions.length > 0
+            anchors.fill: parent
+            anchors.margins: 4
             clip: true
+            enabled: !root.locationSearchPending
+            interactive: contentHeight > height
             model: root.locationSuggestions
             delegate: Rectangle {
               required property var modelData
@@ -445,6 +461,7 @@ PopupWindow {
                 onClicked: root.selectLocation(modelData)
               }
             }
+          }
         }
       }
 

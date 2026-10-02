@@ -24,6 +24,7 @@ Singleton {
   property int lastFetchTime: 0
   property int retryAttempts: 0
   property var locationSuggestions: []
+  property bool locationSearchPending: false
   property int _locationSearchSerial: 0
   property string _locationSearchQuery: ""
   readonly property int _minFetchInterval: 30000
@@ -217,15 +218,19 @@ Singleton {
   function searchLocations(query) {
     root._locationSearchQuery = String(query || "").trim()
     root._locationSearchSerial++
-    root.locationSuggestions = []
-    if (root._locationSearchQuery.length < 2 || root._locationSearchQuery.indexOf(",") >= 0)
+    if (root._locationSearchQuery.length < 2 || root._locationSearchQuery.indexOf(",") >= 0) {
+      root.locationSuggestions = []
+      root.locationSearchPending = false
       return
+    }
+    root.locationSearchPending = true
     locationSearchDelay.restart()
   }
 
   function receiveLocationSearch(text, serial) {
     if (serial !== root._locationSearchSerial)
       return
+    root.locationSearchPending = false
     try {
       const response = JSON.parse(text.trim())
       root.locationSuggestions = (response.results || []).slice(0, 5).map(result => ({
@@ -344,6 +349,7 @@ Singleton {
       if (exitCode !== 0 && root._activeLocationSearchSerial === root._locationSearchSerial) {
         console.warn("WeatherService: location search failed with exit code", exitCode)
         root.locationSuggestions = []
+        root.locationSearchPending = false
       }
       if (root._activeLocationSearchSerial !== root._locationSearchSerial)
         locationSearchDelay.restart()
