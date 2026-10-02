@@ -78,51 +78,57 @@ Singleton {
     }
   }
 
-  // Probe real mounted filesystems together. Pseudo-filesystems are excluded
-  // so the disk widget represents actual storage partitions.
+  // Report mounted filesystems backed by a physical block device. This avoids
+  // showing Flatpak, portal, network, and other virtual mounts as storage.
   property Process diskProbe: Process {
     id: diskProbe
     command: [
       "bash", "-c",
-      "df -P -x tmpfs -x devtmpfs -x efivarfs -x squashfs -x overlay 2>/dev/null | " +
-      "awk 'NR > 1 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && !seen[$1]++ " +
-      "{print $6 \"|\" ($3 * 1024) \"|\" ($2 * 1024)}'"
+      "df -P 2>/dev/null | awk 'NR > 1 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && !seen[$1]++ " +
+      "{print $1 \"|\" $6 \"|\" ($3 * 1024) \"|\" ($2 * 1024)}' | " +
+      "while IFS='|' read -r source mount used total; do " +
+      "case \"$source\" in /dev/*) ;; *) continue;; esac; " +
+      "if lsblk -s -nr -o TYPE,TRAN \"$source\" 2>/dev/null | " +
+      "awk '$1 == \"disk\" && $2 != \"\" {found=1} END {exit !found}'; then " +
+      "printf '%s|%s|%s\\n' \"$mount\" \"$used\" \"$total\"; fi; done"
     ]
-    stdout: SplitParser {
-      onRead: function(line) {
-        const parts = String(line).trim().split("|")
-        if (parts.length < 3) return
+    stdout: StdioCollector {
+      onStreamFinished: root.updateDiskMounts(text)
+    }
+    onExited: function(exitCode) {
+      if (exitCode !== 0)
+        console.warn("SystemStatsService: physical disk probe failed with exit code", exitCode)
+    }
+  }
 
-        const mount = parts[0]
-        const usedBytes = parseFloat(parts[1]) || 0
-        const totalBytes = parseFloat(parts[2]) || 0
-        if (!mount || totalBytes <= 0) return
+  function updateDiskMounts(output) {
+    const mounts = []
+    for (const line of String(output).split(/\r?\n/)) {
+      const parts = line.trim().split("|")
+      if (parts.length < 3)
+        continue
+      const used = Number(parts[1])
+      const total = Number(parts[2])
+      if (!parts[0] || !Number.isFinite(used) || !Number.isFinite(total) || total <= 0)
+        continue
+      mounts.push({
+        mount: parts[0],
+        used: used,
+        total: total,
+        usage: Math.min(100, Math.max(0, used / total * 100))
+      })
+    }
+    root.diskMounts = mounts
 
-        let mounts = root.diskMounts.slice()
-        const entry = {
-          mount: mount,
-          used: usedBytes,
-          total: totalBytes,
-          usage: Math.min(100, Math.max(0, usedBytes / totalBytes * 100))
-        }
-        const index = mounts.findIndex(item => item.mount === mount)
-        if (index >= 0) {
-          const previous = mounts[index]
-          if (previous.used === entry.used && previous.total === entry.total)
-            return
-          mounts[index] = entry
-        } else {
-          mounts.push(entry)
-        }
-        root.diskMounts = mounts
-
-        const primary = root.diskMounts.find(item => item.mount === "/") || root.diskMounts[0]
-        if (primary) {
-          root.diskUsage = primary.usage
-          root.diskUsedText = root._fmtBytes(primary.used)
-          root.diskTotalText = root._fmtBytes(primary.total)
-        }
-      }
+    const primary = mounts.find(item => item.mount === "/") || mounts[0]
+    if (primary) {
+      root.diskUsage = primary.usage
+      root.diskUsedText = root._fmtBytes(primary.used)
+      root.diskTotalText = root._fmtBytes(primary.total)
+    } else {
+      root.diskUsage = 0
+      root.diskUsedText = "0B"
+      root.diskTotalText = "0B"
     }
   }
 

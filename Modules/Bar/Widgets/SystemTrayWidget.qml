@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Widgets
 import qs.Common
@@ -16,10 +17,16 @@ BasePill {
   property var submenuStack: []
   property int menuX: 0
   property int menuY: 0
+  property bool menuFromOverflow: false
+  property int overflowX: 0
+  property int overflowY: 0
   property int submenuX: 0
   property int submenuY: 0
   property bool overflowOpen: false
   property int trayRevision: 0
+  readonly property real availableMenuHeight: root.parentScreen
+    ? Math.max(120, root.parentScreen.height - (root.barWindow ? root.barWindow.height : Theme.barHeight) - Theme.space2() * 2)
+    : 420
 
   readonly property var allItems: {
     void trayRevision
@@ -189,8 +196,13 @@ BasePill {
           onPressed: function(mouse) {
             mouse.accepted = true
             const point = root.mapToItem(root.barWindow.contentItem, root.width / 2, root.height)
-            root.menuX = Math.round(point.x - overflowPopup.width / 2)
-            root.menuY = Math.round(point.y)
+            const popupWidth = Math.max(48, hiddenRow.implicitWidth + 16)
+            const screenWidth = root.parentScreen ? root.parentScreen.width : root.barWindow.width
+            root.overflowX = Math.round(Math.max(8, Math.min(
+              screenWidth - popupWidth - 8,
+              point.x - popupWidth / 2
+            )))
+            root.overflowY = Math.round(point.y)
             root.overflowOpen = !root.overflowOpen
           }
         }
@@ -261,12 +273,34 @@ BasePill {
     return String(entry.text).replace(/\s*<IMAGE>/g, "")
   }
 
-  function _trayClick(item, button) {
+  function _trayClick(item, button, overflowItem) {
     if (!item) return
     if (button === Qt.RightButton && item.hasMenu) {
-      const point = root.mapToItem(root.barWindow.contentItem, root.width / 2, root.height)
-      const x = Math.round(point.x - trayMenu.width / 2)
-      const y = Math.round(point.y)
+      let x
+      let y
+      if (overflowItem) {
+        const itemPoint = overflowItem.mapToItem(overflowPopup.contentItem, 0, 0)
+        const gap = 6
+        const screenWidth = root.parentScreen ? root.parentScreen.width : root.barWindow.width
+        const canOpenRight = root.overflowX + overflowPopup.width + gap + trayMenu.width <= screenWidth - 8
+        x = canOpenRight
+          ? overflowPopup.width + gap
+          : -trayMenu.width - gap
+        y = itemPoint.y
+        root.menuFromOverflow = true
+      } else {
+        const point = root.mapToItem(root.barWindow.contentItem, root.width / 2, root.height)
+        x = point.x - trayMenu.width / 2
+        y = point.y
+        root.menuFromOverflow = false
+      }
+      if (!overflowItem) {
+        const screenWidth = root.parentScreen ? root.parentScreen.width : root.barWindow.width
+        x = Math.max(8, Math.min(screenWidth - trayMenu.width - 8, x))
+      } else {
+        x = Math.round(x)
+      }
+      y = Math.round(y)
 
       // Reset first so repeated clicks on the same item always rehydrate the
       // QsMenuOpener and reopen a popup that the compositor already closed.
@@ -286,8 +320,8 @@ BasePill {
   PopupWindow {
     id: overflowPopup
     anchor.window: root.barWindow
-    anchor.rect.x: root.menuX
-    anchor.rect.y: root.menuY
+    anchor.rect.x: root.overflowX
+    anchor.rect.y: root.overflowY
     visible: root.overflowOpen
     grabFocus: true
     color: "transparent"
@@ -352,15 +386,16 @@ BasePill {
               cursorShape: Qt.PointingHandCursor
               onClicked: function(mouse) {
                 if (mouse.button === Qt.RightButton && modelData.hasMenu) {
-                  root._trayClick(modelData, Qt.RightButton)
+                  root._trayClick(modelData, Qt.RightButton, parent)
                 } else if (mouse.button === Qt.LeftButton) {
                   // Keep the button state in sync before activating an item.
                   // PopupWindow can also close itself when its grab is released.
-                  root.overflowOpen = false
                   if (modelData.onlyMenu && modelData.hasMenu)
-                    root._trayClick(modelData, Qt.RightButton)
-                  else
+                    root._trayClick(modelData, Qt.RightButton, parent)
+                  else {
+                    root.overflowOpen = false
                     modelData.activate()
+                  }
                 }
               }
             }
@@ -377,14 +412,14 @@ BasePill {
 
   PopupWindow {
     id: trayMenu
-    anchor.window: root.barWindow
+    anchor.window: root.menuFromOverflow ? overflowPopup : root.barWindow
     anchor.rect.x: root.menuX
     anchor.rect.y: root.menuY
     visible: root.openMenuItem !== null
     grabFocus: true
     color: "transparent"
     implicitWidth: 240
-    implicitHeight: Math.min(420, menuList.contentHeight + 16)
+    implicitHeight: Math.min(root.availableMenuHeight, menuList.contentHeight + 16)
 
     Rectangle {
       anchors.fill: parent
@@ -403,6 +438,9 @@ BasePill {
         clip: true
         spacing: 2
         model: menuOpener.children.values
+        ScrollBar.vertical: ScrollBar {
+          policy: ScrollBar.AsNeeded
+        }
         header: Rectangle {
           width: menuList.width
           height: 32
@@ -510,7 +548,7 @@ BasePill {
             grabFocus: true
             color: "transparent"
             implicitWidth: 240
-            implicitHeight: Math.min(420, submenuList.contentHeight + 16)
+            implicitHeight: Math.min(root.availableMenuHeight, submenuList.contentHeight + 16)
 
             Rectangle {
               anchors.fill: parent
@@ -528,6 +566,9 @@ BasePill {
                 anchors.margins: 8
                 clip: true
                 spacing: 2
+                ScrollBar.vertical: ScrollBar {
+                  policy: ScrollBar.AsNeeded
+                }
                 model: {
                   const level = root.submenuStack[root.submenuStack.length - 1]
                   const children = level ? level.opener.children : null

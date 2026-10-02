@@ -58,6 +58,9 @@ Item {
       var entry = list[i]
       if (!entry || entry.enabled !== true) continue
       var comp = root.registryFor(entry.id)
+      if (comp && comp.status === Component.Error) {
+        console.error("MQBAR component error for", entry.id, ":", comp.errorString())
+      }
       if (comp === null) { console.error("MQBAR skip (no comp):", entry.id); continue }
       var targetRow = entry.id === "player" ? playerRow : hostRow
       var obj = comp.createObject(targetRow, {
@@ -65,8 +68,18 @@ Item {
         "parentScreen": root.screen,
         "barWindow": root.barWindow
       })
-      root._created.push(obj)
-      console.error("MQBAR created:", entry.id, "parent=", hostRow.objectName, "w=", obj.width, "h=", obj.height, "vis=", obj.visible)
+      if (obj) {
+        if (entry.id === "focusedWindow") {
+          const titleWidget = obj
+          obj.maxWidth = Qt.binding(function() {
+            return root.titleSpaceFor(titleWidget)
+          })
+        }
+        root._created.push(obj)
+        console.error("MQBAR created:", entry.id, "parent=", hostRow.objectName, "w=", obj.width, "h=", obj.height, "vis=", obj.visible)
+      } else {
+        console.error("MQBAR failed to create obj for:", entry.id)
+      }
     }
   }
 
@@ -80,6 +93,25 @@ Item {
     root.fillRow(SettingsData.barRightWidgets, rightRow)
     console.error("MQBAR done. leftRow children=", leftRow.data.length, "centerRow children=", centerRow.data.length, "rightRow children=", rightRow.data.length)
     console.error("MQBAR leftRow w=", leftRow.width, "centerRow w=", centerRow.width, "rightRow w=", rightRow.width)
+  }
+
+  function titleSpaceFor(titleWidget) {
+    var usedWidth = 0
+    var precedingWidgets = 0
+    for (var i = 0; i < leftRow.children.length; i++) {
+      var child = leftRow.children[i]
+      if (child === titleWidget)
+        break
+      if (!child.visible)
+        continue
+      if (precedingWidgets > 0)
+        usedWidth += root.spacing
+      usedWidth += child.width
+      precedingWidgets++
+    }
+    if (precedingWidgets > 0)
+      usedWidth += root.spacing
+    return Math.max(0, playerRow.x - root.spacing - leftRow.x - usedWidth)
   }
 
   Component.onCompleted: {
@@ -103,9 +135,10 @@ Item {
 
   Row {
     id: centerRow
-    anchors.horizontalCenter: parent.horizontalCenter
+    x: Math.max(0, Math.min((root.width - width) / 2, rightRow.x - root.spacing - width))
     anchors.verticalCenter: parent.verticalCenter
     spacing: root.spacing
+    visible: rightRow.x >= width + root.spacing
   }
 
   Row {
@@ -114,6 +147,7 @@ Item {
     anchors.rightMargin: root.spacing
     anchors.verticalCenter: parent.verticalCenter
     spacing: root.spacing
+    visible: centerRow.visible
   }
 
   Row {

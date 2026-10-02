@@ -41,6 +41,10 @@ Singleton {
   property string monoFontFamily: "JetBrainsMono NF"
   property string clockFormat: "24h"
   property string clockDateFormat: "yyyy-MM-dd"
+  property bool weatherEnabled: true
+  property bool useFahrenheit: false
+  property string weatherLocation: ""
+  property string weatherCoordinates: ""
   property bool showDock: true
   property bool dockAutoHide: true
   property bool dockGroupByApp: true

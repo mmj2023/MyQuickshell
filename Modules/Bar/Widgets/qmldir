@@ -4,6 +4,7 @@ DmsIcon 1.0 DmsIcon.qml
 TemperatureWidget 1.0 TemperatureWidget.qml
 BatteryWidget 1.0 BatteryWidget.qml
 PlayerWidget 1.0 PlayerWidget.qml
+PlayerLyricsView 1.0 PlayerLyricsView.qml
 ClockWidget 1.0 ClockWidget.qml
 CpuWidget 1.0 CpuWidget.qml
 DiskWidget 1.0 DiskWidget.qml
@@ -14,3 +15,5 @@ RunningAppsWidget 1.0 RunningAppsWidget.qml
 SubmapWidget 1.0 SubmapWidget.qml
 SystemTrayWidget 1.0 SystemTrayWidget.qml
 WorkspacesWidget 1.0 WorkspacesWidget.qml
+WeatherOverlay 1.0 WeatherOverlay.qml
+WeatherForecastCard 1.0 WeatherForecastCard.qml

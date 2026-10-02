@@ -23,6 +23,10 @@ var SPEC = {
     monoFontFamily: { def: "JetBrainsMono NF" },
     clockFormat: { def: "24h" },
     clockDateFormat: { def: "yyyy-MM-dd" },
+    weatherEnabled: { def: true },
+    useFahrenheit: { def: false },
+    weatherLocation: { def: "" },
+    weatherCoordinates: { def: "" },
 
     // ---- dock --------------------------------------------------------------
     showDock: { def: true },
@@ -48,7 +52,7 @@ var SPEC = {
         def: [
             { id: "player", enabled: true },
             { id: "clock", enabled: true },
-            { id: "weather", enabled: true }
+            
         ]
     },
     barRightWidgets: {

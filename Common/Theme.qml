@@ -271,6 +271,16 @@ Singleton {
   readonly property int widgetThickness: 26
   readonly property int barPosition: typeof SettingsData !== "undefined" ? SettingsData.barPosition : 1
 
+  // ---- spacing aliases matching DMS ----
+  readonly property int spacingXXS: spaceXXS
+  readonly property int spacingXS: spaceXS
+  readonly property int spacingS: spaceS
+  readonly property int spacingM: spaceM
+  readonly property int spacingL: spaceL
+  readonly property int spacingXL: spaceXL
+
+  readonly property color nestedSurface: surfaceContainerHigh
+  readonly property color outlineMedium: outline
   // ---- spacing --------------------------------------------------------------
   readonly property int spaceXXS: 2
   readonly property int spaceXS: 4
