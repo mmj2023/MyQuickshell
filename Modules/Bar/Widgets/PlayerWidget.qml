@@ -562,16 +562,18 @@ BasePill {
 
           Text {
             text: root.formatTime(root.displayedPosition)
-            color: Theme.onSurface
+            color: Theme.surfaceText
             font.family: Theme.fontFamily
             font.pixelSize: 12
+            font.weight: Font.DemiBold
           }
           Item { width: parent.width - 90; height: 1 }
           Text {
             text: root.formatTime(root.player ? root.player.length : 0)
-            color: Theme.onSurface
+            color: Theme.surfaceText
             font.family: Theme.fontFamily
             font.pixelSize: 12
+            font.weight: Font.DemiBold
           }
         }
       }
@@ -878,4 +880,5 @@ BasePill {
     const remaining = total % 60
     return minutes + ":" + remaining.toString().padStart(2, "0")
   }
+
 }

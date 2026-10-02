@@ -24,6 +24,10 @@ BasePill {
   property int submenuY: 0
   property bool overflowOpen: false
   property int trayRevision: 0
+  property bool overflowTooltipHovered: false
+  property string overflowTooltipText: "hidden tray icons"
+  property int overflowTooltipX: 0
+  property int overflowTooltipY: 0
   readonly property real availableMenuHeight: root.parentScreen
     ? Math.max(120, root.parentScreen.height - (root.barWindow ? root.barWindow.height : Theme.barHeight) - Theme.space2() * 2)
     : 420
@@ -83,6 +87,27 @@ BasePill {
     return item && item.id ? String(item.id) : ""
   }
 
+  function showOverflowTooltip(icon, text) {
+    if (!root.barWindow)
+      return
+    root.overflowTooltipText = text
+    const point = icon.mapToItem(root.barWindow.contentItem, icon.width / 2, icon.height)
+    const screenWidth = root.parentScreen ? root.parentScreen.width : root.barWindow.width
+    const popupWidth = overflowTooltipPopup.implicitWidth
+    root.overflowTooltipX = Math.max(16, Math.min(
+      screenWidth - popupWidth - 16,
+      point.x - popupWidth / 2
+    ))
+    root.overflowTooltipY = Math.round(point.y + Theme.spaceXS)
+    overflowTooltipDelay.restart()
+  }
+
+  function hideOverflowTooltip() {
+    root.overflowTooltipHovered = false
+    overflowTooltipDelay.stop()
+    overflowTooltipPopup.visible = false
+  }
+
   content: Component {
     Row {
       spacing: 2
@@ -129,8 +154,15 @@ BasePill {
             acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
             cursorShape: Qt.PointingHandCursor
             hoverEnabled: true
-            onEntered: parent.hovered = true
-            onExited: parent.hovered = false
+            onEntered: {
+              parent.hovered = true
+              root.overflowTooltipHovered = true
+              root.showOverflowTooltip(parent, root._trayItemName(item))
+            }
+            onExited: {
+              parent.hovered = false
+              root.hideOverflowTooltip()
+            }
             onClicked: function(mouse) {
               if (mouse.button === Qt.MiddleButton) {
                 SettingsData.hideTrayId(root.trayKey(item))
@@ -193,6 +225,11 @@ BasePill {
           anchors.fill: parent
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
+          onEntered: {
+            root.overflowTooltipHovered = true
+            root.showOverflowTooltip(parent, "hidden tray icons")
+          }
+          onExited: root.hideOverflowTooltip()
           onPressed: function(mouse) {
             mouse.accepted = true
             const point = root.mapToItem(root.barWindow.contentItem, root.width / 2, root.height)
@@ -239,6 +276,25 @@ BasePill {
       return "?"
     const itemId = String(item.id || "").trim()
     return itemId === "" ? "?" : itemId.charAt(0).toUpperCase()
+  }
+
+  function _trayItemName(item) {
+    if (!item)
+      return "Unknown tray item"
+    const tooltip = item.tooltip
+    const candidates = [
+      item.title,
+      item.tooltipTitle,
+      item.name,
+      tooltip && typeof tooltip === "object" ? tooltip.title : "",
+      item.id
+    ]
+    for (let i = 0; i < candidates.length; i++) {
+      const value = String(candidates[i] || "").trim()
+      if (value !== "")
+        return value
+    }
+    return "Unknown tray item"
   }
 
   function _iconSource(icon) {
@@ -384,6 +440,11 @@ BasePill {
               acceptedButtons: Qt.LeftButton | Qt.RightButton
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
+              onEntered: {
+                root.overflowTooltipHovered = true
+                root.showOverflowTooltip(parent, root._trayItemName(modelData))
+              }
+              onExited: root.hideOverflowTooltip()
               onClicked: function(mouse) {
                 if (mouse.button === Qt.RightButton && modelData.hasMenu) {
                   root._trayClick(modelData, Qt.RightButton, parent)
@@ -408,6 +469,45 @@ BasePill {
   QsMenuOpener {
     id: menuOpener
     menu: root.openMenuItem ? root.openMenuItem.menu : null
+  }
+
+  Timer {
+    id: overflowTooltipDelay
+    interval: 450
+    repeat: false
+    onTriggered: {
+      if (root.overflowTooltipHovered)
+        overflowTooltipPopup.visible = true
+    }
+  }
+
+  PopupWindow {
+    id: overflowTooltipPopup
+    anchor.window: root.barWindow
+    anchor.rect.x: root.overflowTooltipX
+    anchor.rect.y: root.overflowTooltipY
+    visible: false
+    color: "transparent"
+    implicitWidth: tooltipText.implicitWidth + Theme.spaceL * 2
+    implicitHeight: tooltipText.implicitHeight + Theme.spaceM * 2
+
+    Rectangle {
+      anchors.fill: parent
+      radius: Theme.cornerRadius
+      color: Theme.withAlpha(
+        Theme.widgetBaseBackgroundColor,
+        typeof SettingsData !== "undefined" ? SettingsData.barWidgetTransparency : 0.65
+      )
+
+      Text {
+        id: tooltipText
+        anchors.centerIn: parent
+        text: root.overflowTooltipText
+        color: Theme.widgetTextColor
+        font.family: Theme.fontFamily
+        font.pixelSize: root.textSize()
+      }
+    }
   }
 
   PopupWindow {

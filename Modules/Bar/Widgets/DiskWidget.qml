@@ -21,40 +21,127 @@ BasePill {
   property int popupX: 0
   property int popupY: 0
   readonly property var mounts: SystemStatsService.diskMounts
+  readonly property string homeMountPath: "/home/" + Quickshell.env("USER")
+  readonly property var primaryMounts: [
+    root.mounts.find(item => item.mount === "/") || null,
+    root.mounts.find(item => item.mount === "/boot") || null,
+    root.mounts.find(item => item.mount === "/home" || item.mount === root.homeMountPath) || null
+  ].filter(item => item !== null)
+  readonly property var secondaryMounts: root.mounts
+    .filter(item => !root.primaryMounts.some(primary => primary.mount === item.mount))
+    .slice()
+    .sort((a, b) => {
+      const groupA = root.mountGroup(a.mount)
+      const groupB = root.mountGroup(b.mount)
+      if (groupA !== groupB)
+        return groupA - groupB
+      const depthA = a.mount.split("/").filter(part => part !== "").length
+      const depthB = b.mount.split("/").filter(part => part !== "").length
+      return depthA === depthB ? a.mount.localeCompare(b.mount) : depthA - depthB
+    })
+    readonly property real secondaryLineHeight: Math.max(9, Math.round(root.textSize() * 0.7)) + 2
+    readonly property real primaryLineHeight: Math.max(root.iconSize(), root.textSize()) + 2
+    readonly property real primaryGroupHeight: {
+      let maxHeight = 0
+      for (let i = 0; i < root.primaryMounts.length; i++)
+        maxHeight = Math.max(maxHeight, root.primaryLineHeight
+          + root.secondaryMountsFor(root.primaryMounts[i].mount).length * root.secondaryLineHeight)
+      return maxHeight
+  }
 
   content: Component {
     Item {
-      implicitWidth: collapsedRow.implicitWidth
-      implicitHeight: collapsedRow.implicitHeight
-      Row {
-        id: collapsedRow
-        visible: !root.showLabel
-        spacing: 4
+      id: contentRoot
+      implicitWidth: storageColumn.implicitWidth
+      implicitHeight: storageColumn.implicitHeight
+
+      Column {
+        id: storageColumn
         anchors.centerIn: parent
-        Repeater {
-          model: root.mounts
-          delegate: Row {
-            required property var modelData
-            spacing: 3
-            DmsIcon {
-              name: "storage"
-              size: root.iconSize()
-              color: root.usageColor(modelData.usage)
-              anchors.verticalCenter: parent.verticalCenter
-            }
-            Text {
-              text: root.displayMount(modelData.mount) + " " + Math.round(modelData.usage) + "%"
-              color: Theme.widgetTextColor
-              font.family: Theme.monoFontFamily
-              font.pixelSize: root.textSize()
-              anchors.verticalCenter: parent.verticalCenter
+        spacing: 1
+        visible: !root.showLabel
+
+        Row {
+          id: primaryMountRow
+          spacing: 4
+          height: root.primaryGroupHeight
+
+          Repeater {
+            model: root.primaryMounts
+
+            delegate: Item {
+              id: mountGroup
+              required property var modelData
+              readonly property var childMounts: root.secondaryMountsFor(modelData.mount)
+              readonly property real lineHeight: root.primaryLineHeight
+
+              implicitWidth: groupColumn.implicitWidth
+              width: implicitWidth
+              height: root.primaryGroupHeight
+
+              Column {
+                id: groupColumn
+                y: parent.childMounts.length > 0
+                  ? 0 : (parent.height - parent.lineHeight) / 2
+                spacing: 0
+
+                Row {
+                  id: primaryLine
+                  height: root.primaryLineHeight
+                  spacing: 3
+
+                  DmsIcon {
+                    name: "storage"
+                    size: root.iconSize()
+                    color: root.usageColor(modelData.usage)
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+
+                  Text {
+                    text: root.displayMount(modelData.mount) + " " + Math.round(modelData.usage) + "%"
+                    color: Theme.widgetTextColor
+                    font.family: Theme.monoFontFamily
+                    font.pixelSize: root.textSize()
+                    font.bold: true
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+                }
+
+                Repeater {
+                  model: mountGroup.childMounts
+
+                  delegate: Row {
+                    required property var modelData
+                    height: root.secondaryLineHeight
+                    spacing: 3
+
+                    Item {
+                      width: root.iconSize()
+                      height: root.secondaryLineHeight
+
+                      DmsIcon {
+                        anchors.centerIn: parent
+                        name: "storage"
+                        size: Math.max(10, Math.round(root.iconSize() * 0.65))
+                        color: Theme.widgetInactiveIconColor
+                      }
+                    }
+
+                    Text {
+                      text: root.displayMountRelative(modelData.mount, mountGroup.modelData.mount)
+                        + " " + Math.round(modelData.usage) + "%"
+                      color: Theme.widgetInactiveIconColor
+                      font.family: Theme.monoFontFamily
+                      font.pixelSize: Math.max(9, Math.round(root.textSize() * 0.7))
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+                  }
+                }
+              }
             }
           }
         }
-      }
-      Column {
-        id: expandedColumn
-        visible: false
+
       }
 
       PopupWindow {
@@ -122,6 +209,37 @@ BasePill {
     const homePrefix = "/home/" + Quickshell.env("USER")
     return mount === homePrefix ? "~" :
       (mount.indexOf(homePrefix + "/") === 0 ? "~" + mount.slice(homePrefix.length) : mount)
+  }
+
+  function displayMountRelative(mount, parentMount) {
+    const homePrefix = "/home/" + Quickshell.env("USER")
+    if (mount === homePrefix || mount.indexOf(homePrefix + "/") === 0)
+      return root.displayMount(mount)
+    const prefix = parentMount === "/" ? "/" : parentMount + "/"
+    return mount.indexOf(prefix) === 0 ? mount.slice(parentMount.length) : root.displayMount(mount)
+  }
+
+  function mountGroup(mount) {
+    if (mount.indexOf("/boot/") === 0)
+      return 0
+    if (mount === "/home" || mount.indexOf("/home/") === 0)
+      return 1
+    return 2
+  }
+
+  function secondaryMountsFor(primaryMount) {
+    return root.secondaryMounts.filter(item => root.primaryParentFor(item.mount) === primaryMount)
+  }
+
+  function primaryParentFor(mount) {
+    let parentMount = ""
+    for (let i = 0; i < root.primaryMounts.length; i++) {
+      const candidate = root.primaryMounts[i].mount
+      const prefix = candidate === "/" ? "/" : candidate + "/"
+      if (mount.indexOf(prefix) === 0 && candidate.length > parentMount.length)
+        parentMount = candidate
+    }
+    return parentMount
   }
 
   function updatePopupPosition() {

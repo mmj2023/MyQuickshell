@@ -27,6 +27,11 @@ var SPEC = {
     useFahrenheit: { def: false },
     weatherLocation: { def: "" },
     weatherCoordinates: { def: "" },
+    calendarBirthYear: { def: 0 },
+    calendarLifeExpectancy: { def: 90 },
+    calendarEvents: { def: [] },
+    pomodoroWorkMinutes: { def: 25 },
+    pomodoroBreakMinutes: { def: 5 },
 
     // ---- dock --------------------------------------------------------------
     showDock: { def: true },

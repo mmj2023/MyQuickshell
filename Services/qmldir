@@ -4,6 +4,7 @@ singleton DMSService 1.0 DMSService.qml
 singleton MatugenService 1.0 MatugenService.qml
 singleton LyricsService 1.0 LyricsService.qml
 singleton SystemStatsService 1.0 SystemStatsService.qml
+singleton SettingsPanelService 1.0 SettingsPanelService.qml
 singleton TrayService 1.0 TrayService.qml
 singleton WorkspacesService 1.0 WorkspacesService.qml
 singleton WeatherService 1.0 WeatherService.qml

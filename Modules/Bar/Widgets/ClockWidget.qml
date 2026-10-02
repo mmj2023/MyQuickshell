@@ -6,7 +6,7 @@ import qs.Services
 
 // Clock widget: bold time with a compact date, plus integrated weather display
 // (weather icon + temp) beside the time reading, inspired by DMS.
-// Clicking the weather indicator toggles the WeatherOverlay overview popup.
+// Clicking the clock opens the calendar overview; the weather indicator opens its forecast.
 BasePill {
   id: root
 
@@ -16,9 +16,24 @@ BasePill {
   Component.onCompleted: WeatherService.addRef()
   Component.onDestruction: WeatherService.removeRef()
 
+  onClicked: {
+    if (!root.barWindow)
+      return
+    const localPos = root.mapToItem(root.barWindow.contentItem, 0, 0)
+    calendarOverview.toggle(
+      localPos.x + root.width / 2,
+      root.barWindow.height
+    )
+  }
+
   // Overlay popup instance for this screen/bar
   WeatherOverlay {
     id: weatherOverlay
+    barWindow: root.barWindow
+  }
+
+  CalendarOverview {
+    id: calendarOverview
     barWindow: root.barWindow
   }
 

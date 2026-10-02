@@ -14,7 +14,7 @@ import "Settings/SpecUtil.js" as Util
 Singleton {
   id: root
 
-  readonly property int settingsConfigVersion: 4
+  readonly property int settingsConfigVersion: 5
   readonly property string _configDir: StandardPaths.writableLocation(StandardPaths.ConfigLocation) + "/myquickshell"
   readonly property string settingsPath: _configDir + "/settings.json"
 
@@ -45,6 +45,11 @@ Singleton {
   property bool useFahrenheit: false
   property string weatherLocation: ""
   property string weatherCoordinates: ""
+  property int calendarBirthYear: 0
+  property int calendarLifeExpectancy: 90
+  property var calendarEvents: []
+  property int pomodoroWorkMinutes: 25
+  property int pomodoroBreakMinutes: 5
   property bool showDock: true
   property bool dockAutoHide: true
   property bool dockGroupByApp: true

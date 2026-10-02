@@ -12,9 +12,15 @@ BasePill {
 
   property var barWindow: null
   property var parentScreen: null
+  property bool overviewOpen: false
+  property int overviewX: 0
+  property int overviewY: 0
 
   readonly property real level: UPower.displayDevice ? (UPower.displayDevice.percentage * 100) : -1
   readonly property bool hasBattery: level >= 0
+  readonly property var batteryDevices: UPower.devices
+    ? UPower.devices.values.filter(device => device && device.isLaptopBattery)
+    : []
   readonly property var accessoryDevices: {
     if (!UPower.devices)
       return []
@@ -38,6 +44,60 @@ BasePill {
   property bool _lowNotified: false
   property bool _fullNotified: false
   property var _accessoryNotificationStates: ({})
+
+  function toggleOverview() {
+    if (root.overviewOpen) {
+      root.overviewOpen = false
+      return
+    }
+    if (!root.barWindow)
+      return
+    const screenWidth = root.parentScreen ? root.parentScreen.width : root.barWindow.width
+    const screenHeight = root.parentScreen ? root.parentScreen.height : root.barWindow.height
+    const popupWidth = Math.min(520, screenWidth - 24)
+    const popupHeight = Math.min(overviewPopup.implicitHeight, screenHeight - 24)
+    const point = root.mapToItem(root.barWindow.contentItem, root.width / 2, 0)
+    root.overviewX = Math.round(Math.max(8, Math.min(
+      screenWidth - popupWidth - 8,
+      point.x - popupWidth / 2
+    )))
+    const belowY = point.y + root.height + 8
+    root.overviewY = Math.round(Math.max(8, Math.min(
+      screenHeight - popupHeight - 8,
+      belowY + popupHeight <= screenHeight - 8 ? belowY : point.y - popupHeight - 8
+    )))
+    root.overviewOpen = true
+  }
+
+  PopupWindow {
+    id: overviewPopup
+    anchor.window: root.barWindow
+    anchor.rect.x: root.overviewX
+    anchor.rect.y: root.overviewY
+    visible: root.overviewOpen
+    grabFocus: true
+    color: "transparent"
+    implicitWidth: Math.min(520, root.parentScreen ? root.parentScreen.width - 24 : 520)
+    implicitHeight: Math.min(
+      batteryOverview.implicitHeight,
+      root.parentScreen ? root.parentScreen.height - 24 : 600
+    )
+
+    onVisibleChanged: {
+      if (!visible)
+        root.overviewOpen = false
+    }
+
+    BatteryOverview {
+      id: batteryOverview
+      width: overviewPopup.width
+      height: overviewPopup.height
+      batteryDevice: UPower.displayDevice
+      batteryDevices: root.batteryDevices
+      accessoryDevices: root.accessoryDevices
+      onCloseRequested: root.overviewOpen = false
+    }
+  }
 
   content: Component {
     Row {
@@ -283,4 +343,6 @@ BasePill {
       return "battery_std"
     }
   }
+
+  onClicked: root.toggleOverview()
 }

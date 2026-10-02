@@ -18,6 +18,10 @@ BasePill {
   property bool overflowOpen: false
   property int popupX: 0
   property int popupY: 0
+  property bool appTooltipHovered: false
+  property string appTooltipText: ""
+  property int appTooltipX: 0
+  property int appTooltipY: 0
   readonly property var screenToplevels: Array.from(ToplevelManager.toplevels.values)
   readonly property var hyprlandToplevels: Array.from(Hyprland.toplevels ? Hyprland.toplevels.values : [])
   readonly property string currentSpecialWorkspace: root._currentSpecialWorkspace()
@@ -109,6 +113,27 @@ BasePill {
     root.overflowOpen = !root.overflowOpen
   }
 
+  function showAppTooltip(icon, title) {
+    if (!root.barWindow || !title)
+      return
+    root.appTooltipText = title
+    const point = icon.mapToItem(root.barWindow.contentItem, icon.width / 2, icon.height)
+    const screenWidth = root.parentScreen ? root.parentScreen.width : root.barWindow.width
+    const popupWidth = Math.min(appTooltipPopup.implicitWidth, Math.max(120, screenWidth - 32))
+    root.appTooltipX = Math.max(16, Math.min(
+      screenWidth - popupWidth - 16,
+      point.x - popupWidth / 2
+    ))
+    root.appTooltipY = Math.round(point.y + Theme.spaceXS)
+    appTooltipDelay.restart()
+  }
+
+  function hideAppTooltip() {
+    root.appTooltipHovered = false
+    appTooltipDelay.stop()
+    appTooltipPopup.visible = false
+  }
+
   content: Component {
     Row {
       spacing: 2
@@ -134,8 +159,15 @@ BasePill {
           }
 
           MouseArea {
+            id: appIconMouse
             anchors.fill: parent
+            hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
+            onEntered: {
+              root.appTooltipHovered = true
+              root.showAppTooltip(parent, win.title)
+            }
+            onExited: root.hideAppTooltip()
             onClicked: win.activate()
           }
         }
@@ -190,6 +222,11 @@ BasePill {
           anchors.fill: parent
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
+          onEntered: {
+            root.appTooltipHovered = true
+            root.showAppTooltip(parent, "more active apps")
+          }
+          onExited: root.hideAppTooltip()
           onClicked: root.toggleOverflow()
         }
       }
@@ -250,13 +287,74 @@ BasePill {
               anchors.fill: parent
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
+              onEntered: {
+                root.appTooltipHovered = true
+                root.showAppTooltip(parent, win.title)
+              }
+              onExited: root.hideAppTooltip()
               onClicked: {
                 root.overflowOpen = false
                 win.activate()
               }
             }
           }
+
         }
+      }
+    }
+  }
+
+  Timer {
+    id: appTooltipDelay
+    interval: 450
+    repeat: false
+    onTriggered: {
+      if (root.appTooltipHovered && root.appTooltipText !== "")
+        appTooltipPopup.visible = true
+    }
+  }
+
+  TextMetrics {
+    id: appTooltipMetrics
+    font.family: Theme.fontFamily
+    font.pixelSize: root.textSize()
+    text: root.appTooltipText
+  }
+
+  PopupWindow {
+    id: appTooltipPopup
+    anchor.window: root.barWindow
+    anchor.rect.x: root.appTooltipX
+    anchor.rect.y: root.appTooltipY
+    visible: false
+    color: "transparent"
+    implicitWidth: Math.min(
+      appTooltipMetrics.advanceWidth + Theme.spaceL * 2,
+      Math.max(120, (root.parentScreen ? root.parentScreen.width : 512) - 32)
+    )
+    implicitHeight: Math.min(
+      appTooltipTextItem.implicitHeight + Theme.spaceM * 2,
+      Math.max(80, (root.parentScreen ? root.parentScreen.height : 800) * 0.5)
+    )
+
+    Rectangle {
+      anchors.fill: parent
+      radius: Theme.cornerRadius
+      color: Theme.withAlpha(
+        Theme.widgetBaseBackgroundColor,
+        typeof SettingsData !== "undefined" ? SettingsData.barWidgetTransparency : 0.65
+      )
+      border.width: 0
+
+      Text {
+        id: appTooltipTextItem
+        anchors.fill: parent
+        anchors.margins: Theme.spaceM
+        text: root.appTooltipText
+        color: Theme.widgetTextColor
+        font.family: Theme.fontFamily
+        font.pixelSize: root.textSize()
+        wrapMode: Text.Wrap
       }
     }
   }

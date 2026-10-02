@@ -30,6 +30,7 @@ Item {
   Component { id: memUsageComp; RamWidget {} }
   Component { id: diskUsageComp; DiskWidget {} }
   Component { id: batteryComp; BatteryWidget {} }
+  Component { id: settingsComp; SettingsWidget {} }
 
   function registryFor(id) {
     switch (id) {
@@ -46,6 +47,7 @@ Item {
     case "memUsage": return memUsageComp
     case "diskUsage": return diskUsageComp
     case "battery": return batteryComp
+    case "controlCenterButton": return settingsComp
     default: return null
     }
   }
@@ -61,7 +63,7 @@ Item {
       if (comp && comp.status === Component.Error) {
         console.error("MQBAR component error for", entry.id, ":", comp.errorString())
       }
-      if (comp === null) { console.error("MQBAR skip (no comp):", entry.id); continue }
+      if (comp === null) { console.info("MQBAR skip (no comp):", entry.id); continue }
       var targetRow = entry.id === "player" ? playerRow : hostRow
       var obj = comp.createObject(targetRow, {
         "screen": root.screen,
@@ -76,7 +78,7 @@ Item {
           })
         }
         root._created.push(obj)
-        console.error("MQBAR created:", entry.id, "parent=", hostRow.objectName, "w=", obj.width, "h=", obj.height, "vis=", obj.visible)
+        console.info("MQBAR created:", entry.id, "parent=", hostRow.objectName, "w=", obj.width, "h=", obj.height, "vis=", obj.visible)
       } else {
         console.error("MQBAR failed to create obj for:", entry.id)
       }
@@ -91,8 +93,8 @@ Item {
     root.fillRow(SettingsData.barLeftWidgets, leftRow)
     root.fillRow(SettingsData.barCenterWidgets, centerRow)
     root.fillRow(SettingsData.barRightWidgets, rightRow)
-    console.error("MQBAR done. leftRow children=", leftRow.data.length, "centerRow children=", centerRow.data.length, "rightRow children=", rightRow.data.length)
-    console.error("MQBAR leftRow w=", leftRow.width, "centerRow w=", centerRow.width, "rightRow w=", rightRow.width)
+    console.info("MQBAR done. leftRow children=", leftRow.data.length, "centerRow children=", centerRow.data.length, "rightRow children=", rightRow.data.length)
+    console.info("MQBAR leftRow w=", leftRow.width, "centerRow w=", centerRow.width, "rightRow w=", rightRow.width)
   }
 
   function titleSpaceFor(titleWidget) {
