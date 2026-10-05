@@ -6,14 +6,15 @@ import qs.Common
 import qs.Modules.Bar.Widgets
 import qs.Services
 
-// Launcher button. Renders a theme-colored Arch Linux mark in a pill. Left click is
-// a hook reserved for the launcher modal (Phase 4); right click toggles the
-// compositor overview.
+// Launcher button. Left click opens Walker; right click toggles the compositor
+// overview.
 BasePill {
   id: root
 
   property var barWindow: null
   property var parentScreen: null
+
+  onClicked: walkerProc.running = true
 
   onRightClicked: {
     overviewProc.command = ["hyprctl", "dispatch", "overview:toggle"]
@@ -47,5 +48,10 @@ BasePill {
   property Process overviewProc: Process {
     id: overviewProc
     command: ["hyprctl", "dispatch", "overview:toggle"]
+  }
+
+  property Process walkerProc: Process {
+    id: walkerProc
+    command: ["walker"]
   }
 }
