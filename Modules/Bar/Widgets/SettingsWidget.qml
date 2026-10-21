@@ -31,7 +31,6 @@ BasePill {
   readonly property var networks: root.wifiDevice && root.wifiDevice.networks
     ? root.wifiDevice.networks.values.slice().sort((a, b) => b.signalStrength - a.signalStrength)
     : []
-  readonly property var visibleNetworks: root.networks.slice(0, 5)
   readonly property var adapter: Bluetooth.defaultAdapter
   readonly property var bluetoothDevices: Bluetooth.devices
     ? Bluetooth.devices.values.filter(device =>
@@ -66,6 +65,16 @@ BasePill {
     running: root.panelOpen
     triggeredOnStart: true
     onTriggered: SettingsPanelService.refresh()
+  }
+
+  // Resume adapter scanning once a pairing session is no longer active.
+  Connections {
+    target: BluetoothService
+    function onBusyChanged() {
+      if (!BluetoothService.busy && root.panelOpen
+          && root.activeQuickSection === "bluetooth" && root.adapter)
+        root.adapter.discovering = true
+    }
   }
 
   content: Component {
@@ -117,7 +126,7 @@ BasePill {
       (root.parentScreen ? root.parentScreen.width : root.barWindow.width) - width - 8,
       point.x + root.width / 2 - width / 2
     )))
-    root.popupY = Math.round(point.y)
+    root.popupY = Math.round(point.y + Theme.spaceXS)
     root.panelOpen = true
   }
 
@@ -321,12 +330,33 @@ BasePill {
               font.pixelSize: Theme.fontSizeSmall
             }
 
-            Repeater {
-              visible: Networking.wifiEnabled
-              model: root.visibleNetworks
+            ListView {
+              id: wifiNetworkList
+              visible: Networking.wifiEnabled && root.networks.length > 0
+              width: wifiSection.width
+              height: Math.min(contentHeight, 34 * 5 + 4 * 4)
+              model: root.networks
+              spacing: 4
+              clip: true
+              interactive: contentHeight > height
+              boundsBehavior: Flickable.StopAtBounds
+
+              ScrollIndicator.vertical: ScrollIndicator {}
+
+              Connections {
+                target: root
+                function onPendingNetworkChanged() {
+                  Qt.callLater(function() {
+                    const index = wifiNetworkList.model.indexOf(root.pendingNetwork)
+                    if (index >= 0)
+                      wifiNetworkList.positionViewAtIndex(index, ListView.Contain)
+                  })
+                }
+              }
+
               delegate: Item {
                 required property var modelData
-                width: wifiSection.width
+                width: wifiNetworkList.width
                 height: networkRow.height + (passwordRow.visible ? passwordRow.height + 6 : 0)
 
                 Row {
@@ -391,7 +421,7 @@ BasePill {
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
                     background: Rectangle {
-                      radius: 7
+                      radius: Theme.cornerRadius
                       color: Theme.withAlpha(Theme.surfaceContainerHighest, 0.75)
                       border.width: 1
                       border.color: wifiPassword.activeFocus ? Theme.primary : Theme.outlineVariant
@@ -403,7 +433,7 @@ BasePill {
                     id: connectButton
                     width: 80
                     height: 32
-                    radius: 7
+                    radius: Theme.hoverRadius
                     color: joinMouse.containsMouse
                       ? Theme.withAlpha(Theme.primary, 0.18)
                       : Theme.withAlpha(Theme.surfaceContainerHighest, 0.75)
@@ -510,12 +540,138 @@ BasePill {
               font.pixelSize: Theme.fontSizeSmall
             }
 
-            Repeater {
-              visible: root.adapter && root.adapter.enabled
-              model: root.bluetoothDevices.slice(0, 5)
+            // Pairing request / status card
+            Rectangle {
+              id: pairingRequestCard
+              visible: root.adapter && root.adapter.enabled && BluetoothService.requestState !== "idle"
+              width: bluetoothSection.width
+              height: pairingRequestContent.implicitHeight + 12
+              radius: Theme.hoverRadius
+              color: Theme.withAlpha(Theme.primary, BluetoothService.requestState === "failed" ? 0.08 : 0.1)
+              border.width: 1
+              border.color: Theme.withAlpha(Theme.primary, 0.3)
+
+              Column {
+                id: pairingRequestContent
+                anchors { left: parent.left; right: parent.right; top: parent.top }
+                anchors.margins: 6
+                spacing: 4
+
+                Row {
+                  width: parent.width
+                  spacing: 7
+                  DmsIcon {
+                    anchors.verticalCenter: parent.verticalCenter
+                    name: BluetoothService.requestState === "failed" ? "error" : "bluetooth_searching"
+                    size: 15
+                    color: BluetoothService.requestState === "failed" ? Theme.error : Theme.primary
+                  }
+                  Text {
+                    width: parent.width - 22
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: BluetoothService.requestState === "failed"
+                      ? (BluetoothService.requestMessage || "Pairing failed")
+                      : ((BluetoothService.requestName || BluetoothService.requestAddress) + " — "
+                        + (BluetoothService.requestMessage || "Pairing…"))
+                    color: BluetoothService.requestState === "failed" ? Theme.error : Theme.widgetTextColor
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                    wrapMode: Text.Wrap
+                  }
+                }
+
+                Row {
+                  width: parent.width
+                  spacing: 4
+
+                  Rectangle {
+                    visible: BluetoothService.requestState === "pin"
+                    width: pinInput.width + 12
+                    height: 26
+                    radius: Theme.hoverRadius
+                    color: Theme.withAlpha(Theme.surfaceContainerHighest, 0.8)
+                    border.width: 1
+                    border.color: pinInput.activeFocus ? Theme.withAlpha(Theme.primary, 0.6) : Theme.withAlpha(Theme.outline, 0.25)
+
+                    TextInput {
+                      id: pinInput
+                      anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
+                      verticalAlignment: TextInput.AlignVCenter
+                      color: Theme.surfaceText
+                      font.family: Theme.monoFontFamily
+                      font.pixelSize: Theme.fontSizeSmall
+                      focus: true
+                      onAccepted: BluetoothService.confirmRequest(BluetoothService.submitPinText(pinInput.text))
+                    }
+                  }
+
+                  Rectangle {
+                    visible: BluetoothService.requestState === "confirm" || BluetoothService.requestState === "pin"
+                    width: acceptLabel.implicitWidth + Theme.spaceM
+                    height: 24
+                    radius: Theme.pillRadius
+                    color: pairingAcceptMa.containsMouse ? Theme.withAlpha(Theme.primary, 0.75) : Theme.primary
+                    Text {
+                      id: acceptLabel
+                      anchors.centerIn: parent
+                      text: BluetoothService.requestState === "confirm" ? "Confirm" : "Pair"
+                      color: Theme.primaryText
+                      font.family: Theme.fontFamily
+                      font.pixelSize: Theme.fontSizeSmall - 1
+                      font.weight: Font.Medium
+                    }
+                    MouseArea {
+                      id: pairingAcceptMa
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: BluetoothService.confirmRequest(BluetoothService.requestState !== "pin" || BluetoothService.submitPinText(pinInput.text))
+                    }
+                  }
+
+                  Rectangle {
+                    width: cancelLabel.implicitWidth + Theme.spaceM
+                    height: 24
+                    radius: Theme.pillRadius
+                    color: pairingCancelMa.containsMouse ? Theme.withAlpha(Theme.surfaceContainerHigh, 0.9) : Theme.withAlpha(Theme.surfaceContainerHigh, 0.6)
+                    Text {
+                      id: cancelLabel
+                      anchors.centerIn: parent
+                      text: BluetoothService.requestState === "failed" ? "Dismiss" : "Cancel"
+                      color: Theme.widgetTextColor
+                      font.family: Theme.fontFamily
+                      font.pixelSize: Theme.fontSizeSmall - 1
+                    }
+                    MouseArea {
+                      id: pairingCancelMa
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: BluetoothService.requestState === "failed"
+                        ? BluetoothService.dismiss()
+                        : BluetoothService.cancelPairing()
+                    }
+                  }
+                }
+              }
+            }
+
+            ListView {
+              id: btDeviceList
+              visible: root.adapter && root.adapter.enabled && root.bluetoothDevices.length > 0
+              width: bluetoothSection.width
+              height: Math.min(contentHeight, 34 * 5 + 4 * 4)
+              model: root.bluetoothDevices
+              spacing: 4
+              clip: true
+              interactive: contentHeight > height
+              boundsBehavior: Flickable.StopAtBounds
+
+              ScrollIndicator.vertical: ScrollIndicator {}
+
               delegate: Item {
                 required property var modelData
-                width: bluetoothSection.width
+                width: btDeviceList.width
                 height: 34
                 Row {
                   anchors.fill: parent
@@ -527,7 +683,7 @@ BasePill {
                     color: modelData.connected ? Theme.primary : Theme.widgetIconColor
                   }
                   Text {
-                    width: parent.width - 84
+                    width: parent.width - 118
                     anchors.verticalCenter: parent.verticalCenter
                     text: modelData.name || modelData.deviceName || modelData.address
                     color: Theme.widgetTextColor
@@ -544,9 +700,32 @@ BasePill {
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall - 1
                   }
+                  Item {
+                    width: 17
+                    height: 17
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: modelData.paired && !modelData.pairing
+                    DmsIcon {
+                      anchors.fill: parent
+                      anchors.margins: 2
+                      name: "close"
+                      size: 13
+                      color: forgetMa.containsMouse ? Theme.error : Theme.widgetInactiveIconColor
+                    }
+                    MouseArea {
+                      id: forgetMa
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: BluetoothService.forgetDevice(modelData)
+                    }
+                  }
                 }
                 MouseArea {
-                  anchors.fill: parent
+                  anchors.left: parent.left
+                  anchors.top: parent.top
+                  anchors.bottom: parent.bottom
+                  width: parent.width - 34
                   enabled: modelData.state !== BluetoothDeviceState.Connecting && !modelData.pairing
                   cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                   onClicked: {
@@ -555,7 +734,7 @@ BasePill {
                     else if (modelData.paired)
                       modelData.connect()
                     else
-                      modelData.pair()
+                      BluetoothService.pairDevice(modelData)
                   }
                 }
               }
@@ -636,10 +815,75 @@ BasePill {
             ComboBox {
               id: sinkSelector
               width: parent.width
+              height: 32
               visible: root.audioSinks.length > 1
               model: root.audioSinks.map(node => node.description || node.nickname || node.name)
               currentIndex: root.audioSinks.indexOf(Pipewire.defaultAudioSink)
               onActivated: index => Pipewire.preferredDefaultAudioSink = root.audioSinks[index]
+              contentItem: Text {
+                leftPadding: 10
+                rightPadding: 30
+                text: sinkSelector.currentText
+                color: Theme.surfaceText
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+              }
+              indicator: DmsIcon {
+                x: sinkSelector.width - width - 8
+                anchors.verticalCenter: parent.verticalCenter
+                name: "expand_more"
+                size: 18
+                color: Theme.widgetIconColor
+              }
+              background: Rectangle {
+                radius: Theme.cornerRadius
+                color: Theme.withAlpha(Theme.surfaceContainerHighest, 0.8)
+                border.width: 1
+                border.color: Theme.withAlpha(Theme.outlineVariant, 0.6)
+              }
+              popup: Popup {
+                y: sinkSelector.height
+                width: sinkSelector.width
+                implicitHeight: contentItem.implicitHeight
+                padding: 4
+                background: Rectangle {
+                  radius: Theme.cornerRadius
+                  color: Theme.surfaceContainer
+                  border.width: 1
+                  border.color: Theme.withAlpha(Theme.outlineVariant, 0.7)
+                }
+                contentItem: ListView {
+                  clip: true
+                  implicitHeight: contentHeight
+                  model: sinkSelector.popup.visible ? sinkSelector.delegateModel : null
+                  currentIndex: sinkSelector.highlightedIndex
+                  highlightFollowsCurrentItem: false
+                  boundsBehavior: Flickable.StopAtBounds
+                }
+              }
+              delegate: ItemDelegate {
+                required property int index
+                required property var modelData
+                width: sinkSelector.width
+                text: String(modelData)
+                highlighted: sinkSelector.highlightedIndex === index
+                contentItem: Text {
+                  text: sinkSelector.textAt(index)
+                  color: Theme.surfaceText
+                  font.family: Theme.fontFamily
+                  font.pixelSize: Theme.fontSizeSmall
+                  verticalAlignment: Text.AlignVCenter
+                  elide: Text.ElideRight
+                }
+                background: Rectangle {
+                  radius: Theme.hoverRadius
+                  color: parent.highlighted
+                    ? Theme.withAlpha(Theme.primary, 0.2)
+                    : "transparent"
+                }
+              }
             }
 
             Row {
