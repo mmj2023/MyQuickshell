@@ -7,5 +7,6 @@ singleton NotesService 1.0 NotesService.qml
 singleton SystemStatsService 1.0 SystemStatsService.qml
 singleton SettingsPanelService 1.0 SettingsPanelService.qml
 singleton TrayService 1.0 TrayService.qml
+singleton BluetoothService 1.0 BluetoothService.qml
 singleton WorkspacesService 1.0 WorkspacesService.qml
 singleton WeatherService 1.0 WeatherService.qml

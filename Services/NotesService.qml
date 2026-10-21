@@ -3,6 +3,7 @@ pragma Singleton
 import QtCore
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import qs.Common
 
@@ -40,6 +41,17 @@ Singleton {
       root.toggleRequested()
       return "Toggled MyQuickshell notes overlay"
     }
+  }
+
+  // Compositor-routed keybind (hyprctl dispatch global quickshell:notes):
+  // Hyprland hands the keypress to Quickshell itself, satisfying the
+  // popup's "parent window has received input" gate like a bar click does.
+  GlobalShortcut {
+    appid: "quickshell"
+    name: "notes"
+    description: "Toggle the MyQuickshell notes overlay"
+
+    onPressed: root.toggleRequested()
   }
 
   function localPath(url) {

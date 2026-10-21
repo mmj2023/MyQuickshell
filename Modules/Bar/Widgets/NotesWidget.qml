@@ -103,18 +103,27 @@ BasePill {
       root.fallbackToQtFileDialog(operation, root.chooserInitialPath)
     }
     function onToggleRequested() {
-      console.info("MYQS notes: toggle via IPC, currently", notesPopup.visible
-        ? "visible" : "hidden", "barWindow:", !!root.barWindow)
-      notesPopup.visible = !notesPopup.visible
-      if (notesPopup.visible)
-        Qt.callLater(function() { noteEditor.forceActiveFocus() })
+      root.setNotesVisible(!notesPopup.visible)
     }
   }
 
-  onClicked: {
-    notesPopup.visible = !notesPopup.visible
-    if (notesPopup.visible)
-      Qt.callLater(function() { noteEditor.forceActiveFocus() })
+  onClicked: root.setNotesVisible(!notesPopup.visible)
+
+  function setNotesVisible(openVisible) {
+    if (notesPopup.visible === openVisible)
+      return
+    if (openVisible) {
+      // Attach first (no grab); a deferred grab one event-loop pass later
+      // fires after the attach completes, so the editor gets keyboard focus
+      // on both click and keybind paths.
+      notesPopup.visible = true
+      Qt.callLater(function() {
+        notesPopup.grabFocus = true
+        noteEditor.forceActiveFocus()
+      })
+    } else {
+      notesPopup.visible = false
+    }
   }
 
   // IPC/keyboard toggles go through the plain PopupWindow here: grab-based
@@ -129,10 +138,16 @@ BasePill {
     anchor.rect.x: Math.max(8, screenWidth - implicitWidth - 8)
     anchor.rect.y: root.barWindow ? root.barWindow.height + Theme.spaceXS : Theme.spaceXS
     visible: false
-    // Hyprland refuses xdg-popup keyboard grabs whose parent surface has not
-    // received input; an IPC (super+shift+N) toggle delivers none, so the
-    // attach bounced and visible snapped back to false. No grab = attach works
-    // from CLI/network toggles as well as clicks.
+    // Open without a grab (the only attach that succeeds from an IPC toggle),
+    // then request the keyboard grab AFTER the attach completes -- a deferred
+    // one event-loop pass, which PopupWindow 0.3 has no onOpened for.
+    //
+    // Known quirk (Wayland grab-popup input serial): a client-initiated toggle
+    // carries no seat input serial, so after a fresh shell start the keyboard
+    // grab is refused ("Failed to create grabbing popup ... parent window has
+    // received input") until one real interaction -- clicking the bar button
+    // once warms it up, after which every super+shift+n toggle works with
+    // full typing focus for the rest of the session. Restarting resets it.
     grabFocus: false
     color: "transparent"
     surfaceFormat.opaque: false
