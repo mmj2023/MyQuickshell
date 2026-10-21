@@ -31,15 +31,20 @@ The important architecture constraint is to keep compositor-specific logic and s
 
 ## Key conventions
 
+- Follow the cross-agent theming and popup-spacing rules in the repository-root
+  `AGENTS.md`; use it as the source of truth for consistent theme spacing and
+  popup anchor coordinates.
 - Prefer `pragma Singleton` for shared state. Global state is intentionally centralized in the `Common` and `Services` singletons instead of scattered across widgets.
 - Use `Theme.*` tokens instead of hardcoded colors or spacing values. The design relies on Material 3 token names such as `surfaceContainer`, `primary`, `onSurface`, and the color helpers in `Theme.qml`.
 - Persist settings through `SettingsData.qml`, not by creating ad hoc config properties in UI files. New configuration keys belong in the declarative spec in `Common/Settings/SettingsSpec.js` and are surfaced via `SettingsData.qml`.
 - Treat system integration as a backend seam: `Services/DMSService.qml` is intentionally a no-op interface for future IPC/backend work, and `WorkspacesService.qml` abstracts compositor-specific workspace state behind a stable API.
 - Keep UI widgets focused on rendering and binding to `Theme`/service data. Avoid calling external commands or reading compositor details directly inside `Modules/Bar/Widgets/*`.
 - The bar is per-screen and layer-shell based. New UI contributions should follow the existing `PanelWindow` + `BarBody` pattern rather than creating independent floating windows unless the feature truly requires it.
+- When adding or changing an external runtime/build dependency, document in
+  `README.md` whether it is required or optional, the feature that uses it, and
+  the fallback behavior. This applies to all agents and contributors.
 
 ## Relevant repo notes
 
 - README.md is the best source for the project shape and runtime requirements. It describes MyQuickshell as a self-contained Quickshell shell for Wayland compositors and notes the `hyprctl`/layer-shell dependency.
 - The project is built around a DMS/omarchy-inspired architecture but is intentionally self-contained. The implementation details doc explains the intended design and is useful when adding new modules or matching existing conventions.
-- There is no `.github/copilot-instructions.md` yet; this file should be the canonical place for repo-specific agent guidance.

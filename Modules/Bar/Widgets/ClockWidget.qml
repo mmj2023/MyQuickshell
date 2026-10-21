@@ -88,12 +88,12 @@ BasePill {
       Item {
         id: weatherClickArea
         anchors.verticalCenter: parent.verticalCenter
-        width: weatherRow.implicitWidth + 8
-        height: weatherRow.implicitHeight + 6
+        width: weatherRow.implicitWidth + Theme.spaceXS * 2
+        height: weatherRow.implicitHeight + Theme.hoverVerticalInset * 2
 
         Rectangle {
           anchors.fill: parent
-          radius: 6
+          radius: Theme.hoverRadius
           color: weatherMa.containsMouse ? Theme.withAlpha(Theme.primary, 0.12) : "transparent"
         }
 

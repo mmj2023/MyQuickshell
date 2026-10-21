@@ -264,6 +264,8 @@ Singleton {
   readonly property string monoFontFamily: typeof SettingsData !== "undefined" ? SettingsData.monoFontFamily : "JetBrainsMono NF"
   readonly property real fontScale: typeof SettingsData !== "undefined" ? SettingsData.fontScale : 0.94
   readonly property int cornerRadius: typeof SettingsData !== "undefined" ? SettingsData.cornerRadius : 11
+  readonly property real hoverRadius: cornerRadius * 0.55
+  readonly property real hoverVerticalInset: spaceXS - spaceXXS / 2
   readonly property int pillRadius: 999
 
   readonly property int barThickness: 28

@@ -239,7 +239,7 @@ BasePill {
               screenWidth - popupWidth - 8,
               point.x - popupWidth / 2
             )))
-            root.overflowY = Math.round(point.y)
+            root.overflowY = Math.round(point.y + Theme.spaceXS)
             root.overflowOpen = !root.overflowOpen
           }
         }
@@ -347,7 +347,7 @@ BasePill {
       } else {
         const point = root.mapToItem(root.barWindow.contentItem, root.width / 2, root.height)
         x = point.x - trayMenu.width / 2
-        y = point.y
+        y = point.y + Theme.spaceXS
         root.menuFromOverflow = false
       }
       if (!overflowItem) {
@@ -544,7 +544,7 @@ BasePill {
         header: Rectangle {
           width: menuList.width
           height: 32
-          radius: 6
+          radius: Theme.hoverRadius
           color: menuHeaderMouse.containsMouse ? Theme.surfaceText_12 : "transparent"
 
           Text {
@@ -580,7 +580,7 @@ BasePill {
           readonly property var iconSource: entry.icon
           width: menuList.width
           height: entry.isSeparator ? 1 : 32
-          radius: 6
+          radius: Theme.hoverRadius
           color: entry.isSeparator ? Theme.withAlpha(Theme.outline, 0.3)
                                    : (menuMouse.containsMouse ? Theme.surfaceText_12 : "transparent")
           opacity: entry.enabled ? 1 : 0.45
@@ -681,7 +681,7 @@ BasePill {
                   readonly property var iconSource: entry.icon
                   width: submenuList.width
                   height: entry.isSeparator ? 1 : 32
-                  radius: 6
+                  radius: Theme.hoverRadius
                   color: entry.isSeparator ? Theme.withAlpha(Theme.outline, 0.3)
                                            : (submenuMouse.containsMouse ? Theme.surfaceText_12 : "transparent")
                   opacity: entry.enabled ? 1 : 0.45

@@ -61,10 +61,10 @@ BasePill {
       screenWidth - popupWidth - 8,
       point.x - popupWidth / 2
     )))
-    const belowY = point.y + root.height + 8
+    const belowY = point.y + root.height + Theme.spaceXS
     root.overviewY = Math.round(Math.max(8, Math.min(
       screenHeight - popupHeight - 8,
-      belowY + popupHeight <= screenHeight - 8 ? belowY : point.y - popupHeight - 8
+      belowY + popupHeight <= screenHeight - 8 ? belowY : point.y - popupHeight - Theme.spaceXS
     )))
     root.overviewOpen = true
   }
