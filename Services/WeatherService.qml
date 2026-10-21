@@ -175,11 +175,11 @@ Singleton {
   }
   function formatTemp(c) {
     if (c == null) return "--"
-    return (_useF() ? Math.round(c*9/5+32) : Math.round(c)) + "°" + (_useF() ? "F" : "C")
+    return (_useF() ? c*9/5+32 : c) + "°" + (_useF() ? "F" : "C")
   }
   function formatPercent(v) { return v != null ? v + "%" : "--" }
-  function formatSpeed(kmh) { return kmh != null ? Math.round(kmh) + " km/h" : "--" }
-  function formatPressure(hpa) { return hpa != null ? Math.round(hpa) + " hPa" : "--" }
+  function formatSpeed(kmh) { return kmh != null ? kmh + " km/h" : "--" }
+  function formatPressure(hpa) { return hpa != null ? hpa + " hPa" : "--" }
   function calendarDayDifference(a, b) {
     return Math.floor((Date.UTC(b.getFullYear(),b.getMonth(),b.getDate()) -
       Date.UTC(a.getFullYear(),a.getMonth(),a.getDate())) / 86400000)
@@ -369,11 +369,11 @@ Singleton {
           const forecast = (daily.time||[]).map(function(t,i) {
             return {
               day: root._fmtDay(t,i), wCode: daily.weather_code?.[i]||0,
-              tempMin: Math.round(daily.temperature_2m_min?.[i]||0),
-              tempMax: Math.round(daily.temperature_2m_max?.[i]||0),
-              tempMinF: Math.round((daily.temperature_2m_min?.[i]||0)*9/5+32),
-              tempMaxF: Math.round((daily.temperature_2m_max?.[i]||0)*9/5+32),
-              precipitationProbability: Math.round(daily.precipitation_probability_max?.[i]||0),
+              tempMin: daily.temperature_2m_min?.[i]||0,
+              tempMax: daily.temperature_2m_max?.[i]||0,
+              tempMinF: (daily.temperature_2m_min?.[i]||0)*9/5+32,
+              tempMaxF: (daily.temperature_2m_max?.[i]||0)*9/5+32,
+              precipitationProbability: daily.precipitation_probability_max?.[i]||0,
               sunrise: daily.sunrise?.[i] ? root._fmtTime(daily.sunrise[i]) : "",
               sunset:  daily.sunset?.[i]  ? root._fmtTime(daily.sunset[i])  : "",
               rawSunrise: daily.sunrise?.[i]||"", rawSunset: daily.sunset?.[i]||""
@@ -388,14 +388,14 @@ Singleton {
             const hC = hourly.temperature_2m?.[i]||0
             return {
               time: root._fmtTime(ht), rawTime: ht,
-              temp: Math.round(hC), tempF: Math.round(hC*9/5+32),
-              feelsLike: Math.round(hourly.apparent_temperature?.[i]||hC),
-              feelsLikeF: Math.round((hourly.apparent_temperature?.[i]||hC)*9/5+32),
+              temp: hC, tempF: hC*9/5+32,
+              feelsLike: hourly.apparent_temperature?.[i]||hC,
+              feelsLikeF: (hourly.apparent_temperature?.[i]||hC)*9/5+32,
               wCode: hourly.weather_code?.[i]||0,
-              humidity: Math.round(hourly.relative_humidity_2m?.[i]||0),
-              wind: Math.round(hourly.wind_speed_10m?.[i]||0),
-              pressure: Math.round(hourly.surface_pressure?.[i]||0),
-              precipitationProbability: Math.round(hourly.precipitation_probability?.[i]||0),
+              humidity: hourly.relative_humidity_2m?.[i]||0,
+              wind: hourly.wind_speed_10m?.[i]||0,
+              pressure: hourly.surface_pressure?.[i]||0,
+              precipitationProbability: hourly.precipitation_probability?.[i]||0,
               isDay: sr<t && t<ss
             }
           })
@@ -403,17 +403,17 @@ Singleton {
           root.lastFetchError = ""; root.retryAttempts = 0
           root.weather = {
             available:true, loading:false,
-            temp:Math.round(tC), tempF:Math.round(tC*9/5+32),
-            feelsLike:Math.round(fC), feelsLikeF:Math.round(fC*9/5+32),
+            temp:tC, tempF:tC*9/5+32,
+            feelsLike:fC, feelsLikeF:fC*9/5+32,
             city:root.location?.city||"", country:root.location?.country||"",
             wCode:cur.weather_code||0,
-            humidity:Math.round(cur.relative_humidity_2m||0),
-            wind:Math.round(cur.wind_speed_10m||0),
+            humidity:cur.relative_humidity_2m||0,
+            wind:cur.wind_speed_10m||0,
             sunrise: daily.sunrise?.[0] ? root._fmtTime(daily.sunrise[0]) : "06:00",
             sunset:  daily.sunset?.[0]  ? root._fmtTime(daily.sunset[0])  : "18:00",
             rawSunrise: daily.sunrise?.[0]||"", rawSunset: daily.sunset?.[0]||"",
-            pressure:Math.round(cur.surface_pressure||0),
-            precipitationProbability:Math.round(daily.precipitation_probability_max?.[0]||0),
+            pressure:cur.surface_pressure||0,
+            precipitationProbability:daily.precipitation_probability_max?.[0]||0,
             isDay:Boolean(cur.is_day),
             forecast:forecast, hourlyForecast:hourlyForecast
           }

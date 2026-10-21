@@ -1,14 +1,13 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQuick.Shapes
 import Quickshell
 import qs.Common
 import qs.Services
 import qs.Modules.Bar.Widgets
 
-// Weather overview popup. Opened by ClockWidget when the user clicks the temp.
-// Positioned below the bar to avoid covering its widgets. Contains conditions, metrics, 7-day and
-// hourly forecast lists, and an inline location settings row.
+// Weather overview popup styled after DMS's weather dashboard.
 PopupWindow {
   id: root
 
@@ -17,21 +16,29 @@ PopupWindow {
   property real anchorY: 0
 
   anchor.window: root.barWindow
-  anchor.rect.x: Math.max(8, Math.min(
-    (root.barWindow ? root.barWindow.width : Screen.width) - implicitWidth - 8,
+  anchor.rect.x: Math.max(Theme.spaceS, Math.min(
+    (root.barWindow ? root.barWindow.width : Screen.width) - implicitWidth - Theme.spaceS,
     root.anchorX - implicitWidth / 2
   ))
-  anchor.rect.y: root.anchorY + 4
+  anchor.rect.y: root.anchorY + Theme.spaceXS
   visible: false
   grabFocus: true
   color: "transparent"
   surfaceFormat.opaque: false
-  implicitWidth: 520
-  implicitHeight: column.implicitHeight + 32 +
-    (locationSuggestions.length > 0 ? Math.min(160, locationSuggestionList.contentHeight) + 16 : 0)
+  implicitWidth: Math.min(860, Math.max(380, Screen.width - Theme.spaceXL * 2))
+  implicitHeight: column.implicitHeight + Theme.spaceL * 2 +
+    (locationSuggestions.length > 0 ? Math.min(160, locationSuggestionList.contentHeight) + Theme.spaceL : 0)
 
   readonly property var locationSuggestions: WeatherService.locationSuggestions
   readonly property bool locationSearchPending: WeatherService.locationSearchPending
+  readonly property var heroMetrics: [
+    { icon: "humidity_low", label: qsTr("Humidity"), value: WeatherService.formatPercent(WeatherService.weather.humidity) },
+    { icon: "air", label: qsTr("Wind"), value: WeatherService.formatSpeed(WeatherService.weather.wind) },
+    { icon: "speed", label: qsTr("Pressure"), value: WeatherService.formatPressure(WeatherService.weather.pressure) },
+    { icon: "rainy", label: qsTr("Precipitation"), value: WeatherService.formatPercent(WeatherService.weather.precipitationProbability) },
+    { icon: "wb_twilight", label: qsTr("Sunrise"), value: WeatherService.weather.sunrise || "--" },
+    { icon: "bedtime", label: qsTr("Sunset"), value: WeatherService.weather.sunset || "--" }
+  ]
 
   onVisibleChanged: {
     if (visible) {
@@ -80,181 +87,290 @@ PopupWindow {
     Column {
       id: column
       anchors { left: parent.left; right: parent.right; top: parent.top }
-      anchors.margins: 16
-      spacing: 12
+      anchors.margins: Theme.spaceL
+      spacing: Theme.spaceS
 
-      // ---- Header: icon + temp + condition + location -----------------------
-      Item {
+      // Current conditions and the six key weather readings.
+      Rectangle {
+        id: heroCard
         width: parent.width
-        height: heroRow.implicitHeight
+        height: 148
+        radius: Theme.cornerRadius
+        color: Theme.withAlpha(Theme.surfaceContainerHigh, 0.6)
+        border.width: 1
+        border.color: Theme.withAlpha(Theme.outline, 0.18)
 
         Row {
-          id: heroRow
-          spacing: 12
-          anchors.left: parent.left
-          anchors.verticalCenter: parent.verticalCenter
+          anchors.fill: parent
+          anchors.margins: Theme.spaceL
+          spacing: Theme.spaceL
 
-          // Weather icon via DmsIcon
-          DmsIcon {
-            width: 40; height: 40
-            size: 36
-            color: Theme.primary
+          Row {
+            width: heroCard.width * 0.38
             anchors.verticalCenter: parent.verticalCenter
-            name: WeatherService.weatherIcon(WeatherService.weather.wCode, WeatherService.weather.isDay)
-          }
+            spacing: Theme.spaceL
 
-          Column {
-            spacing: 2
-            anchors.verticalCenter: parent.verticalCenter
-            Row {
-              spacing: 6
+            DmsIcon {
+              anchors.verticalCenter: parent.verticalCenter
+              name: WeatherService.weatherIcon(WeatherService.weather.wCode, WeatherService.weather.isDay)
+              size: 48
+              color: Theme.primary
+            }
+
+            Column {
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Theme.spaceXS
+
               Text {
                 text: WeatherService.currentTempText()
                 color: Theme.surfaceText
                 font.family: Theme.monoFontFamily
-                font.pixelSize: Math.round(Theme.fontSizeMedium * 1.6)
-                font.bold: true
-                anchors.verticalCenter: parent.verticalCenter
+                font.pixelSize: Theme.fontSizeMedium * 2.3
+                font.weight: Font.Light
               }
+
               Text {
-                text: WeatherService.weather.feelsLike !== WeatherService.weather.temp
-                  ? "feels " + WeatherService.formatTemp(WeatherService.weather.feelsLike) : ""
-                visible: text !== ""
+                text: WeatherService.weatherCondition(WeatherService.weather.wCode)
+                color: Theme.withAlpha(Theme.surfaceText, 0.72)
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeMedium
+              }
+
+              Text {
+                text: qsTr("Feels Like %1").arg(WeatherService.formatTemp(WeatherService.weather.feelsLike))
                 color: Theme.withAlpha(Theme.surfaceText, 0.5)
-                font.family: Theme.monoFontFamily
+                font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
-                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Text {
+                visible: text.length > 0
+                text: [WeatherService.weather.city, WeatherService.weather.country].filter(Boolean).join(", ")
+                color: Theme.withAlpha(Theme.surfaceText, 0.5)
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                elide: Text.ElideRight
               }
             }
-            Text {
-              text: WeatherService.weatherCondition(WeatherService.weather.wCode)
-              color: Theme.withAlpha(Theme.surfaceText, 0.7)
-              font.family: Theme.fontFamily
-              font.pixelSize: Theme.fontSizeSmall
-            }
-            Text {
-              text: WeatherService.weather.city + (WeatherService.weather.country ? ", " + WeatherService.weather.country : "")
-              visible: WeatherService.weather.city !== ""
-              color: Theme.withAlpha(Theme.surfaceText, 0.5)
-              font.family: Theme.fontFamily
-              font.pixelSize: Theme.fontSizeSmall - 1
-            }
-          }
-        }
-
-        // Header actions (refresh + close)
-        Row {
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: 4
-
-          Rectangle {
-            width: 28; height: 28; radius: 14
-            color: refreshMa.containsMouse ? Theme.withAlpha(Theme.primary, 0.12) : "transparent"
-            DmsIcon {
-              anchors.centerIn: parent
-              name: "refresh"
-              size: 18
-              color: Theme.withAlpha(Theme.surfaceText, 0.6)
-            }
-            MouseArea {
-              id: refreshMa
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: WeatherService.forceRefresh()
-            }
           }
 
-          Rectangle {
-            width: 28; height: 28; radius: 14
-            color: closeMa.containsMouse ? Theme.withAlpha(Theme.error, 0.15) : "transparent"
-            DmsIcon {
-              anchors.centerIn: parent
-              name: "close"
-              size: 18
-              color: closeMa.containsMouse ? Theme.error : Theme.withAlpha(Theme.surfaceText, 0.6)
-            }
-            MouseArea {
-              id: closeMa
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.toggle(root.anchorX, root.anchorY)
+          Grid {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            columns: 3
+            columnSpacing: Theme.spaceXL
+            rowSpacing: Theme.spaceS
+
+            Repeater {
+              model: root.heroMetrics
+
+              delegate: Row {
+                required property var modelData
+                spacing: Theme.spaceXS
+
+                DmsIcon {
+                  name: modelData.icon
+                  size: 16
+                  color: Theme.withAlpha(Theme.surfaceText, 0.5)
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Column {
+                  spacing: Theme.spaceXXS
+                  Text {
+                    text: modelData.label
+                    color: Theme.withAlpha(Theme.surfaceText, 0.5)
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                  }
+                  Text {
+                    text: modelData.value
+                    color: Theme.surfaceText
+                    font.family: Theme.monoFontFamily
+                    font.pixelSize: Theme.fontSizeMedium
+                  }
+                }
+              }
             }
           }
         }
       }
 
-      // ---- Metrics row ------------------------------------------------------
       Rectangle {
+        id: skyCard
         width: parent.width
-        height: metricsRow.implicitHeight + 16
+        height: 76
         radius: Theme.cornerRadius
-        color: Theme.withAlpha(Theme.surfaceContainerHigh, 0.6)
+        color: Theme.withAlpha(Theme.surfaceContainerHigh, 0.25)
+
+        Text {
+          anchors.left: parent.left
+          anchors.top: parent.top
+          anchors.margins: Theme.spaceS
+          text: WeatherService.getCurrentSunTime(new Date())?.period || ""
+          color: Theme.withAlpha(Theme.surfaceText, 0.62)
+          font.family: Theme.fontFamily
+          font.pixelSize: Theme.fontSizeSmall
+        }
+
+        Rectangle {
+          visible: !!WeatherService.location
+          height: 1
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.leftMargin: Theme.spaceS
+          anchors.rightMargin: Theme.spaceS
+          color: Theme.withAlpha(Theme.outline, 0.2)
+        }
+
+        Shape {
+          visible: !!WeatherService.location
+          anchors.fill: parent
+          anchors.margins: Theme.spaceS
+
+          ShapePath {
+            strokeColor: Theme.withAlpha(Theme.outline, 0.35)
+            strokeWidth: 1
+            fillColor: "transparent"
+            PathPolyline {
+              path: {
+                const points = WeatherService.getEcliptic(new Date()) || []
+                return points.map(point => Qt.point(
+                  point.h * (skyCard.width - Theme.spaceS * 2),
+                  (1 - point.v) * (skyCard.height - Theme.spaceS * 2) / 2
+                ))
+              }
+            }
+          }
+        }
 
         Row {
-          id: metricsRow
-          anchors.centerIn: parent
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.leftMargin: Theme.spaceL
+          anchors.rightMargin: Theme.spaceL
+          anchors.bottomMargin: Theme.spaceXS
           spacing: 0
 
           Repeater {
-            model: [
-              {label:"Humidity",    value:WeatherService.weather.humidity+"%"},
-              {label:"Wind",        value:WeatherService.formatSpeed(WeatherService.weather.wind)},
-              {label:"Pressure",    value:WeatherService.formatPressure(WeatherService.weather.pressure)},
-              {label:"Rain",        value:WeatherService.weather.precipitationProbability+"%"},
-              {label:"Sunrise",     value:WeatherService.weather.sunrise},
-              {label:"Sunset",      value:WeatherService.weather.sunset}
-            ]
-
-            Column {
-              spacing: 2
-              width: 520 / 6 - 6
-              leftPadding: 4; rightPadding: 4
-
-              Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: modelData.label
-                color: Theme.withAlpha(Theme.surfaceText, 0.5)
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall - 1
-              }
-              Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: modelData.value
-                color: Theme.surfaceText
-                font.family: Theme.monoFontFamily
-                font.pixelSize: Theme.fontSizeSmall
-                font.bold: true
-              }
+            model: ["E", "S", "W"]
+            delegate: Text {
+              required property string modelData
+              width: parent.width / 3
+              text: modelData
+              color: Theme.primary
+              font.family: Theme.monoFontFamily
+              font.pixelSize: Theme.fontSizeSmall
+              horizontalAlignment: Text.AlignHCenter
             }
+          }
+        }
+
+        DmsIcon {
+          id: sunMarker
+          property var position: WeatherService.getSkyArcPosition(new Date(), true)
+          visible: !!position
+          x: Theme.spaceS + (position?.h ?? 0) * (parent.width - Theme.spaceS * 2) - width / 2
+          y: Theme.spaceS + (1 - (position?.v ?? 0)) * (parent.height - Theme.spaceS * 2) / 2 - height / 2
+          name: "light_mode"
+          size: 20
+          color: Theme.primary
+        }
+
+        DmsIcon {
+          id: moonMarker
+          property var position: WeatherService.getSkyArcPosition(new Date(), false)
+          visible: !!position
+          x: Theme.spaceS + (position?.h ?? 0) * (parent.width - Theme.spaceS * 2) - width / 2
+          y: Theme.spaceS + (1 - (position?.v ?? 0)) * (parent.height - Theme.spaceS * 2) / 2 - height / 2
+          name: "bedtime"
+          size: 16
+          color: Theme.withAlpha(Theme.surfaceText, 0.7)
+
+          ToolTip.visible: moonHover.containsMouse
+          ToolTip.text: {
+            const phase = WeatherService.getMoonPhase(new Date()).replace(/^moon_/, "").replace(/_/g, " ")
+            return phase.charAt(0).toUpperCase() + phase.slice(1)
+          }
+
+          MouseArea {
+            id: moonHover
+            anchors.fill: parent
+            hoverEnabled: true
           }
         }
       }
 
-      // ---- Forecast tab switcher -------------------------------------------
+      // Forecast mode and actions.
       Row {
-        spacing: 8
+        id: forecastToolbar
+        width: parent.width
+        height: 36
+        spacing: Theme.spaceS
         Repeater {
-          model: ["Daily", "Hourly"]
+          model: [qsTr("Daily"), qsTr("Hourly")]
           Rectangle {
-            width: 72; height: 24; radius: 12
-            color: (index===0 ? !showHourly : showHourly) ? Theme.withAlpha(Theme.primary, 0.15) : "transparent"
-            border.color: (index===0 ? !showHourly : showHourly) ? Theme.withAlpha(Theme.primary, 0.4) : Theme.withAlpha(Theme.outline, 0.2)
-            border.width: 1
+            width: 64
+            height: 36
+            radius: Theme.pillRadius
+            color: (index === 0 ? !showHourly : showHourly) ? Theme.primary : "transparent"
             Text {
               anchors.centerIn: parent
               text: modelData
-              color: (index===0 ? !showHourly : showHourly) ? Theme.primary : Theme.withAlpha(Theme.surfaceText, 0.6)
+              color: (index === 0 ? !showHourly : showHourly) ? Theme.onPrimary : Theme.withAlpha(Theme.surfaceText, 0.6)
               font.family: Theme.fontFamily
               font.pixelSize: Theme.fontSizeSmall
             }
             MouseArea {
               anchors.fill: parent
+              hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
-              onClicked: showHourly = (index===1)
+              onClicked: showHourly = index === 1
             }
+          }
+        }
+
+        Item { width: Math.max(0, parent.width - 232); height: 1 }
+
+        Rectangle {
+          width: 36
+          height: 36
+          radius: Theme.pillRadius
+          color: refreshMa.containsMouse ? Theme.withAlpha(Theme.primary, 0.12) : "transparent"
+          DmsIcon {
+            anchors.centerIn: parent
+            name: "refresh"
+            size: 20
+            color: WeatherService.weather.loading ? Theme.primary : Theme.widgetInactiveIconColor
+          }
+          MouseArea {
+            id: refreshMa
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: WeatherService.forceRefresh()
+          }
+        }
+
+        Rectangle {
+          width: 36
+          height: 36
+          radius: Theme.pillRadius
+          color: closeMa.containsMouse ? Theme.withAlpha(Theme.error, 0.15) : "transparent"
+          DmsIcon {
+            anchors.centerIn: parent
+            name: "close"
+            size: 20
+            color: closeMa.containsMouse ? Theme.error : Theme.widgetInactiveIconColor
+          }
+          MouseArea {
+            id: closeMa
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.close()
           }
         }
       }
@@ -262,7 +378,7 @@ PopupWindow {
       // ---- Forecast list ---------------------------------------------------
       Item {
         width: parent.width
-        height: 110
+        height: 148
 
         // Daily
         ListView {
@@ -270,12 +386,12 @@ PopupWindow {
           anchors.fill: parent
           visible: !showHourly
           orientation: ListView.Horizontal
-          spacing: 6
+          spacing: Theme.spaceXS
           clip: true
           model: WeatherService.weather.forecast
 
           delegate: WeatherForecastCard {
-            width: (dailyList.width - 6*6) / 7
+            width: (dailyList.width - Theme.spaceXS * 6) / 7
             height: dailyList.height
             daily: true
             forecastData: modelData
@@ -289,7 +405,7 @@ PopupWindow {
           anchors.fill: parent
           visible: showHourly
           orientation: ListView.Horizontal
-          spacing: 6
+          spacing: Theme.spaceXS
           clip: true
           model: WeatherService.weather.hourlyForecast
 
@@ -297,11 +413,11 @@ PopupWindow {
           Component.onCompleted: positionViewAtIndex(initialIndex, ListView.SnapPosition)
 
           delegate: WeatherForecastCard {
-            width: (hourlyList.width - 6*9) / 10
+            width: (hourlyList.width - Theme.spaceXS * 6) / 7
             height: hourlyList.height
             daily: false
             forecastData: modelData
-            date: { const d=new Date(); d.setHours(index); return d }
+            date: modelData?.rawTime ? new Date(modelData.rawTime) : null
           }
         }
       }
@@ -330,7 +446,7 @@ PopupWindow {
           Rectangle {
             width: parent.width - 170
             height: 26
-            radius: 6
+            radius: Theme.cornerRadius
             color: Theme.withAlpha(Theme.surfaceContainerHighest, 0.8)
             border.color: locInput.activeFocus ? Theme.withAlpha(Theme.primary, 0.6) : Theme.withAlpha(Theme.outline, 0.25)
             border.width: 1
@@ -358,7 +474,7 @@ PopupWindow {
           }
 
           Rectangle {
-            width: 70; height: 26; radius: 6
+            width: 70; height: 26; radius: Theme.hoverRadius
             color: applyMa.containsMouse ? Theme.withAlpha(Theme.primary, 0.2) : Theme.withAlpha(Theme.primary, 0.1)
             border.color: Theme.withAlpha(Theme.primary, 0.4)
             border.width: 1
@@ -379,7 +495,7 @@ PopupWindow {
           }
 
           Rectangle {
-            width: 60; height: 26; radius: 6
+            width: 60; height: 26; radius: Theme.hoverRadius
             color: autoMa.containsMouse ? Theme.withAlpha(Theme.secondary, 0.2) : Theme.withAlpha(Theme.secondary, 0.1)
             border.color: Theme.withAlpha(Theme.secondary, 0.4)
             border.width: 1
@@ -438,7 +554,7 @@ PopupWindow {
               required property var modelData
               width: locationSuggestionList.width
               height: 32
-              radius: 5
+              radius: Theme.hoverRadius
               color: suggestionMouse.containsMouse ? Theme.withAlpha(Theme.primary, 0.16) : "transparent"
 
               Text {

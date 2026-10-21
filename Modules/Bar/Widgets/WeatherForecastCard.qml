@@ -72,66 +72,57 @@ Rectangle {
       anchors.horizontalCenter: parent.horizontalCenter
     }
 
-    Row {
+    DmsIcon {
+      name: root.forecastData ? WeatherService.weatherIcon(root.forecastData.wCode || 0, root.forecastData.isDay ?? true) : "cloud"
+      size: 24
+      color: root.isCurrent ? Theme.primary : Theme.withAlpha(Theme.primary, 0.8)
       anchors.horizontalCenter: parent.horizontalCenter
-      spacing: Theme.spacingM
       visible: root.forecastData != null
+    }
 
-      Column {
-        spacing: Theme.spacingXS
-        anchors.verticalCenter: parent.verticalCenter
+    Text {
+      text: root.daily ? root.minMaxTempText : root.tempText
+      font.family: Theme.monoFontFamily
+      font.pixelSize: Theme.fontSizeSmall
+      color: root.isCurrent ? Theme.primary : Theme.surfaceText
+      font.weight: Font.Medium
+      anchors.horizontalCenter: parent.horizontalCenter
+      visible: root.forecastData != null
+    }
 
-        DmsIcon {
-          name: root.forecastData ? WeatherService.weatherIcon(root.forecastData.wCode || 0, root.forecastData.isDay ?? true) : "cloud"
-          size: 24
-          color: root.isCurrent ? Theme.primary : Theme.withAlpha(Theme.primary, 0.8)
+    Text {
+      text: root.feelsLikeText
+      font.family: Theme.monoFontFamily
+      font.pixelSize: Theme.fontSizeSmall - 2
+      color: root.isCurrent ? Theme.primary : Theme.withAlpha(Theme.surfaceText, 0.7)
+      anchors.horizontalCenter: parent.horizontalCenter
+      visible: !root.daily && !root.dense
+    }
+
+    Column {
+      id: detailsColumn
+      spacing: Theme.spacingXXS
+      visible: !root.dense && !root.daily
+
+      Repeater {
+        model: root.values
+        Row {
           anchors.horizontalCenter: parent.horizontalCenter
-        }
+          spacing: Theme.spacingXXS
 
-        Text {
-          text: root.daily ? root.minMaxTempText : root.tempText
-          font.family: Theme.monoFontFamily
-          font.pixelSize: Theme.fontSizeSmall
-          color: root.isCurrent ? Theme.primary : Theme.surfaceText
-          font.weight: Font.Medium
-          anchors.horizontalCenter: parent.horizontalCenter
-        }
+          DmsIcon {
+            name: modelData.icon
+            size: 10
+            color: Theme.withAlpha(Theme.surfaceText, 0.6)
+            anchors.verticalCenter: parent.verticalCenter
+          }
 
-        Text {
-          text: root.feelsLikeText
-          font.family: Theme.monoFontFamily
-          font.pixelSize: Theme.fontSizeSmall - 2
-          color: root.isCurrent ? Theme.primary : Theme.withAlpha(Theme.surfaceText, 0.7)
-          anchors.horizontalCenter: parent.horizontalCenter
-          visible: !root.daily
-        }
-      }
-
-      Column {
-        id: detailsColumn
-        spacing: Theme.spacingXXS
-        visible: !root.dense && !root.daily
-        anchors.verticalCenter: parent.verticalCenter
-
-        Repeater {
-          model: root.values
-          Row {
-            spacing: Theme.spacingXXS
-
-            DmsIcon {
-              name: modelData.icon
-              size: 10
-              color: Theme.withAlpha(Theme.surfaceText, 0.6)
-              anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Text {
-              text: modelData.text
-              font.family: Theme.monoFontFamily
-              font.pixelSize: Theme.fontSizeSmall - 3
-              color: Theme.withAlpha(Theme.surfaceText, 0.6)
-              anchors.verticalCenter: parent.verticalCenter
-            }
+          Text {
+            text: modelData.text
+            font.family: Theme.monoFontFamily
+            font.pixelSize: Theme.fontSizeSmall - 3
+            color: Theme.withAlpha(Theme.surfaceText, 0.6)
+            anchors.verticalCenter: parent.verticalCenter
           }
         }
       }

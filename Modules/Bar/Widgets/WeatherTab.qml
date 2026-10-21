@@ -407,11 +407,7 @@ Item {
           daily: false
           dense: true
           forecastData: modelData
-          date: {
-            const d = new Date()
-            d.setHours(index)
-            return d
-          }
+          date: modelData?.rawTime ? new Date(modelData.rawTime) : null
         }
       }
     }
