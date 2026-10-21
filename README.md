@@ -6,11 +6,44 @@ of [Quickshell](https://quickshell.outfoxxed.me) (requires >= 0.3.1, Qt 6).
 
 This is a starting point: a single top bar, structured so that more modules
 (control center, dock, notifications, lock, ...) can be added following the
-same conventions.
+same conventions. The bar includes a Notes button that opens a file-based
+plain-text editor with tabs, Open/Save/New actions, optional line numbers,
+configurable autosave, and a Markdown preview that renders note contents without
+changing the saved Markdown source. File dialogs default to
+`~/Documents/notes/`.
 
 > Requires a compositor with the wlr-layer-shell protocol (Hyprland, river,
 > sway, and friends all support it). Workspace state is read via `hyprctl`; the
 > bar degrades gracefully on other compositors, simply hiding that widget.
+> On Hyprland, right-click an inactive workspace to view live previews of its
+> open windows using Quickshell's native Wayland screencopy support.
+> When CPU and memory widgets are both enabled, click each metric in the
+> combined pill to expand its reading; right-click either metric to open the
+> corresponding live System Monitor tab. Click a GPU reading to open the GPU
+> overview. GPU cards are stacked in a scrollable list and expose available
+> utilization, VRAM, memory-controller, temperature, power, and device identity
+> details. Processor and memory tabs also summarize GPUs with measurable
+> activity. The overview also includes a searchable, sortable process list
+> with user/system and per-GPU filters and per-process
+> signal controls; terminating signals require confirmation and signaling is
+> limited to processes owned by the current user.
+> Detected DRM graphics devices are listed in the pill and GPU overview; live
+> utilization and per-process attribution depend on metrics exposed by each
+> device's driver.
+
+## Runtime dependencies
+
+- **Required:** Quickshell 0.3.1 or newer with Qt 6, and a Wayland compositor
+  supporting `wlr-layer-shell`.
+- **Hyprland integration:** `hyprctl` is used for workspace state and related
+  compositor actions; those widgets are unavailable outside Hyprland.
+- **Notes file chooser (optional):** Qt tries Zenity with
+  `GTK_USE_PORTAL=1` first so GTK requests the desktop's default file chooser
+  through `xdg-desktop-portal` when available. If that fails or is unavailable,
+  MyQuickshell tries Zenity's GTK chooser directly, then falls back to Qt Quick's
+  `FileDialog`. Install `zenity` to enable the first two chooser options; a
+  portal service and a desktop-specific portal backend (such as KDE's) are
+  optional and let the portal select the desktop's preferred picker.
 
 ## Showcase
 
