@@ -18,6 +18,12 @@ BasePill {
   property bool overflowOpen: false
   property int popupX: 0
   property int popupY: 0
+  property var previewAppWindow: null
+  property string previewAppTitle: ""
+  property bool previewFromHiddenAppsMenu: false
+  property int previewPopupX: 0
+  property int previewPopupY: 0
+  property bool appPreviewOpen: false
   property bool appTooltipHovered: false
   property string appTooltipText: ""
   property int appTooltipX: 0
@@ -109,8 +115,37 @@ BasePill {
   function toggleOverflow() {
     const point = root.mapToItem(root.barWindow.contentItem, root.width / 2, root.height)
     root.popupX = Math.round(point.x - runningAppsPopup.width / 2)
-    root.popupY = Math.round(point.y)
+    root.popupY = Math.round(point.y + Theme.spaceXS)
     root.overflowOpen = !root.overflowOpen
+  }
+
+  function toggleAppPreview(icon, window, fromHiddenAppsMenu) {
+    if (!root.barWindow || !window)
+      return
+
+    if (root.appPreviewOpen && root.previewAppWindow === window) {
+      root.appPreviewOpen = false
+      return
+    }
+
+    root.previewAppWindow = window
+    root.previewAppTitle = String(window.title || window.appId || qsTr("Application"))
+    root.previewFromHiddenAppsMenu = fromHiddenAppsMenu
+    const screenWidth = root.parentScreen ? root.parentScreen.width : root.barWindow.width
+    if (fromHiddenAppsMenu) {
+      root.previewPopupX = Math.round(
+        (runningAppsPopup.width - appPreviewPopup.implicitWidth) / 2
+      )
+      root.previewPopupY = Math.round(runningAppsPopup.height + Theme.spaceXS)
+    } else {
+      const point = icon.mapToItem(root.barWindow.contentItem, icon.width / 2, icon.height)
+      root.previewPopupX = Math.max(8, Math.min(
+        screenWidth - appPreviewPopup.implicitWidth - 8,
+        point.x - appPreviewPopup.implicitWidth / 2
+      ))
+      root.previewPopupY = Math.round(point.y + Theme.spaceXS)
+    }
+    root.appPreviewOpen = true
   }
 
   function showAppTooltip(icon, title) {
@@ -168,7 +203,15 @@ BasePill {
               root.showAppTooltip(parent, win.title)
             }
             onExited: root.hideAppTooltip()
-            onClicked: win.activate()
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            onClicked: function(mouse) {
+              if (mouse.button === Qt.RightButton) {
+                root.hideAppTooltip()
+                root.toggleAppPreview(parent, win)
+                return
+              }
+              win.activate()
+            }
           }
         }
       }
@@ -286,19 +329,95 @@ BasePill {
               id: hiddenAppMouse
               anchors.fill: parent
               hoverEnabled: true
+              acceptedButtons: Qt.LeftButton | Qt.RightButton
               cursorShape: Qt.PointingHandCursor
               onEntered: {
                 root.appTooltipHovered = true
                 root.showAppTooltip(parent, win.title)
               }
               onExited: root.hideAppTooltip()
-              onClicked: {
+              onClicked: function(mouse) {
+                if (mouse.button === Qt.RightButton) {
+                  root.hideAppTooltip()
+                  root.toggleAppPreview(parent, win, true)
+                  return
+                }
                 root.overflowOpen = false
                 win.activate()
               }
             }
           }
 
+        }
+      }
+    }
+  }
+
+  PopupWindow {
+    id: appPreviewPopup
+    anchor.window: root.previewFromHiddenAppsMenu ? runningAppsPopup : root.barWindow
+    anchor.rect.x: root.previewPopupX
+    anchor.rect.y: root.previewPopupY
+    visible: root.appPreviewOpen
+    grabFocus: true
+    color: "transparent"
+    surfaceFormat.opaque: false
+    implicitWidth: 420
+    implicitHeight: 286
+
+    onVisibleChanged: {
+      if (!visible)
+        root.appPreviewOpen = false
+    }
+
+    Rectangle {
+      anchors.fill: parent
+      radius: Theme.cornerRadius
+      color: Theme.withAlpha(
+        Theme.widgetBaseBackgroundColor,
+        typeof SettingsData !== "undefined" ? SettingsData.popupTransparency : 0.6
+      )
+      border.width: 1
+      border.color: Theme.withAlpha(Theme.outline, 0.35)
+
+      Column {
+        anchors.fill: parent
+        anchors.margins: 12
+        spacing: 8
+
+        Text {
+          width: parent.width
+          height: 20
+          text: root.previewAppTitle
+          color: Theme.widgetTextColor
+          font.pixelSize: 14
+          font.weight: Font.DemiBold
+          elide: Text.ElideRight
+          verticalAlignment: Text.AlignVCenter
+        }
+
+        Rectangle {
+          width: parent.width
+          height: 218
+          radius: Theme.cornerRadius
+          color: Theme.withAlpha(Theme.surfaceContainer, 0.82)
+          clip: true
+
+          ScreencopyView {
+            anchors.fill: parent
+            captureSource: root.previewAppWindow
+            live: root.appPreviewOpen
+            constraintSize.width: parent.width
+            constraintSize.height: parent.height
+          }
+
+          Text {
+            anchors.centerIn: parent
+            visible: !root.previewAppWindow
+            text: qsTr("Preview unavailable")
+            color: Theme.widgetInactiveIconColor
+            font.pixelSize: 13
+          }
         }
       }
     }
