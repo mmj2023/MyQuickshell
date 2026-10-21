@@ -31,6 +31,7 @@ Item {
   Component { id: diskUsageComp; DiskWidget {} }
   Component { id: batteryComp; BatteryWidget {} }
   Component { id: settingsComp; SettingsWidget {} }
+  Component { id: notepadComp; NotesWidget {} }
 
   function registryFor(id) {
     switch (id) {
@@ -48,28 +49,47 @@ Item {
     case "diskUsage": return diskUsageComp
     case "battery": return batteryComp
     case "controlCenterButton": return settingsComp
+    case "notepadButton": return notepadComp
     default: return null
     }
+  }
+
+  function hasEnabledWidget(id) {
+    const lists = [SettingsData.barLeftWidgets, SettingsData.barCenterWidgets, SettingsData.barRightWidgets]
+    for (let listIndex = 0; listIndex < lists.length; listIndex++) {
+      const list = lists[listIndex] || []
+      for (let widgetIndex = 0; widgetIndex < list.length; widgetIndex++) {
+        const entry = list[widgetIndex]
+        if (entry && entry.id === id && entry.enabled === true)
+          return true
+      }
+    }
+    return false
   }
 
   property var _created: []
 
   function fillRow(list, hostRow) {
     if (!list) return
+    const groupCpuMemory = root.hasEnabledWidget("cpuUsage") && root.hasEnabledWidget("memUsage")
     for (var i = 0; i < list.length; i++) {
       var entry = list[i]
       if (!entry || entry.enabled !== true) continue
+      if (groupCpuMemory && entry.id === "memUsage") continue
       var comp = root.registryFor(entry.id)
       if (comp && comp.status === Component.Error) {
         console.error("MQBAR component error for", entry.id, ":", comp.errorString())
       }
       if (comp === null) { console.info("MQBAR skip (no comp):", entry.id); continue }
       var targetRow = entry.id === "player" ? playerRow : hostRow
-      var obj = comp.createObject(targetRow, {
+      var initProps = {
         "screen": root.screen,
         "parentScreen": root.screen,
         "barWindow": root.barWindow
-      })
+      }
+      if (groupCpuMemory && entry.id === "cpuUsage")
+        initProps["groupedMemory"] = true
+      var obj = comp.createObject(targetRow, initProps)
       if (obj) {
         if (entry.id === "focusedWindow") {
           const titleWidget = obj

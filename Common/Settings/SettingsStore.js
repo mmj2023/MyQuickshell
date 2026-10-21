@@ -95,6 +95,22 @@ function migrateToVersion(obj, targetVersion) {
             settings.barCenterWidgets = migratedCenterWidgets;
         }
     }
+    if (currentVersion < 6 && settings.calendarBirthYear === 0)
+        settings.calendarBirthYear = -1;
+    if (currentVersion < 7 && Array.isArray(settings.barRightWidgets) &&
+        !settings.barRightWidgets.some(function(widget) {
+            return widget && widget.id === "notepadButton";
+        })) {
+        var rightWidgetsWithNotepad = settings.barRightWidgets.slice();
+        var settingsButtonIndex = rightWidgetsWithNotepad.findIndex(function(widget) {
+            return widget && widget.id === "controlCenterButton";
+        });
+        rightWidgetsWithNotepad.splice(settingsButtonIndex >= 0 ? settingsButtonIndex : rightWidgetsWithNotepad.length, 0, {
+            id: "notepadButton",
+            enabled: true
+        });
+        settings.barRightWidgets = rightWidgetsWithNotepad;
+    }
     settings.configVersion = targetVersion;
     return settings;
 }

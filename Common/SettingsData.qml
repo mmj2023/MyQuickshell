@@ -14,7 +14,7 @@ import "Settings/SpecUtil.js" as Util
 Singleton {
   id: root
 
-  readonly property int settingsConfigVersion: 5
+  readonly property int settingsConfigVersion: 8
   readonly property string _configDir: StandardPaths.writableLocation(StandardPaths.ConfigLocation) + "/myquickshell"
   readonly property string settingsPath: _configDir + "/settings.json"
 
@@ -45,8 +45,14 @@ Singleton {
   property bool useFahrenheit: false
   property string weatherLocation: ""
   property string weatherCoordinates: ""
-  property int calendarBirthYear: 0
-  property int calendarLifeExpectancy: 90
+  property real calendarBirthYear: -1
+  property real calendarLifeExpectancy: 90
+  property bool notesAutoSave: false
+  property bool notesShowLineNumbers: false
+  property bool notesExpanded: false
+  property bool notesMarkdownPreview: false
+  property bool notesOptionsExpanded: false
+  property bool notesSearchVisible: false
   property var calendarEvents: []
   property int pomodoroWorkMinutes: 25
   property int pomodoroBreakMinutes: 5
@@ -96,6 +102,25 @@ Singleton {
     root[key] = value
     _applyOnChange(key)
     saveSettings()
+  }
+
+  function setMany(updates) {
+    if (_loading || _parseError || !_hasLoaded || !updates || typeof updates !== "object")
+      return false
+    var changed = false
+    for (var key in updates) {
+      const spec = Spec.SPEC[key]
+      if (!spec) continue
+      var value = updates[key]
+      if (typeof value === "string" && spec.coerce)
+        value = spec.coerce(value)
+      root[key] = value
+      _applyOnChange(key)
+      changed = true
+    }
+    if (!changed) return false
+    saveSettings()
+    return true
   }
 
   function setNoPersist(key, value) {

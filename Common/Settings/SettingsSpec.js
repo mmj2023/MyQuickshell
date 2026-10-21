@@ -27,8 +27,14 @@ var SPEC = {
     useFahrenheit: { def: false },
     weatherLocation: { def: "" },
     weatherCoordinates: { def: "" },
-    calendarBirthYear: { def: 0 },
+    calendarBirthYear: { def: -1 },
     calendarLifeExpectancy: { def: 90 },
+    notesAutoSave: { def: false },
+    notesShowLineNumbers: { def: false },
+    notesExpanded: { def: false },
+    notesMarkdownPreview: { def: false },
+    notesOptionsExpanded: { def: false },
+    notesSearchVisible: { def: false },
     calendarEvents: { def: [] },
     pomodoroWorkMinutes: { def: 25 },
     pomodoroBreakMinutes: { def: 5 },
@@ -70,6 +76,7 @@ var SPEC = {
             { id: "memUsage", enabled: true },
             { id: "diskUsage", enabled: true },
             { id: "battery", enabled: true },
+            { id: "notepadButton", enabled: true },
             { id: "controlCenterButton", enabled: true }
         ]
     },
