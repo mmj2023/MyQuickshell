@@ -22,3 +22,4 @@ SystemTrayWidget 1.0 SystemTrayWidget.qml
 WorkspacesWidget 1.0 WorkspacesWidget.qml
 WeatherOverlay 1.0 WeatherOverlay.qml
 WeatherForecastCard 1.0 WeatherForecastCard.qml
+NotesWidget 1.0 NotesWidget.qml
