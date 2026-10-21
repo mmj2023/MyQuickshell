@@ -71,7 +71,7 @@ BasePill {
       return
     const point = root.mapToItem(root.barWindow.contentItem, 0, root.height)
     root.popupX = Math.round(point.x + root.width / 2)
-    root.popupY = Math.round(point.y + Theme.spaceS)
+    root.popupY = Math.round(point.y + Theme.spaceXS)
     root.overviewOpen = !root.overviewOpen
   }
 
@@ -233,6 +233,7 @@ BasePill {
               implicitHeight: contentHeight
               model: outputSelector.popup.visible ? outputSelector.delegateModel : null
               currentIndex: outputSelector.highlightedIndex
+              highlightFollowsCurrentItem: false
               boundsBehavior: Flickable.StopAtBounds
             }
           }
@@ -251,7 +252,7 @@ BasePill {
               elide: Text.ElideRight
             }
             background: Rectangle {
-              radius: 6
+              radius: Theme.hoverRadius
               color: parent.highlighted
                 ? Theme.withAlpha(Theme.primary, root.overviewElementAlpha * 0.6)
                 : "transparent"
@@ -365,6 +366,7 @@ BasePill {
             implicitHeight: contentHeight
             model: playerSelector.popup.visible ? playerSelector.delegateModel : null
             currentIndex: playerSelector.highlightedIndex
+            highlightFollowsCurrentItem: false
             boundsBehavior: Flickable.StopAtBounds
           }
         }
@@ -383,7 +385,7 @@ BasePill {
             elide: Text.ElideRight
           }
           background: Rectangle {
-            radius: 7
+            radius: Theme.hoverRadius
             color: parent.highlighted
               ? Theme.withAlpha(Theme.primary, root.overviewElementAlpha * 0.6)
               : "transparent"
@@ -734,7 +736,8 @@ BasePill {
         anchors.horizontalCenter: parent.horizontalCenter
 
         Item {
-          implicitWidth: root.controlSize * 3 + 4 + 30 + 4
+          implicitWidth: controls.implicitWidth
+            + (root.player && root.player.isPlaying ? 4 + 30 + Theme.spaceS : 0)
           implicitHeight: root.controlSize
           anchors.horizontalCenter: parent.horizontalCenter
 
@@ -774,7 +777,8 @@ BasePill {
 
           Row {
             id: controls
-            anchors.centerIn: parent
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
             spacing: 2
 
           Item {
