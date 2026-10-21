@@ -9,8 +9,8 @@ QtObject {
   property string dateString: ""
   property string weekdayString: ""
   property string timeString: ""
-
-  readonly property bool showSeconds: false
+  property string timeWithSecondsString: ""
+  property string timeWithMillisecondsString: ""
 
   property Timer ticker: Timer {
     id: ticker
@@ -21,13 +21,31 @@ QtObject {
     Component.onCompleted: root.tick()
   }
 
+  property Timer millisecondTicker: Timer {
+    interval: 10
+    running: true
+    repeat: true
+    onTriggered: root.updateTimeWithMilliseconds()
+    Component.onCompleted: root.updateTimeWithMilliseconds()
+  }
+
+  function updateTimeWithMilliseconds() {
+    var now = new Date()
+    var h = now.getHours().toString().padStart(2, "0")
+    var m = now.getMinutes().toString().padStart(2, "0")
+    var s = now.getSeconds().toString().padStart(2, "0")
+    var ms = now.getMilliseconds().toString().padStart(3, "0")
+    timeWithMillisecondsString = h + ":" + m + ":" + s + "." + ms
+  }
+
   function tick() {
     var now = new Date()
     // Force 24-hour time and ISO date regardless of system locale
     var h = now.getHours().toString().padStart(2, "0")
     var m = now.getMinutes().toString().padStart(2, "0")
     var s = now.getSeconds().toString().padStart(2, "0")
-    timeString = root.showSeconds ? (h + ":" + m + ":" + s) : (h + ":" + m)
+    timeString = h + ":" + m
+    timeWithSecondsString = h + ":" + m + ":" + s
     var yr  = now.getFullYear().toString()
     var mo  = (now.getMonth() + 1).toString().padStart(2, "0")
     var day = now.getDate().toString().padStart(2, "0")

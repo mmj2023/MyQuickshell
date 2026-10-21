@@ -89,13 +89,6 @@ PopupWindow {
         }));
     }
 
-    function resetLifeProgress() {
-        SettingsData.set("calendarBirthYear", 0);
-        SettingsData.set("calendarLifeExpectancy", 90);
-        editingLifeProgress = false;
-        lifeProgressError = "";
-    }
-
     function formatPomodoroTime() {
         return String(Math.floor(pomodoroRemaining / 60)).padStart(2, "0") + ":" + String(pomodoroRemaining % 60).padStart(2, "0");
     }
@@ -128,24 +121,71 @@ PopupWindow {
     function toggle(ax, ay) {
         anchorX = ax;
         anchorY = ay;
+        if (!visible) {
+            const dateParts = ClockService.dateString.split("-");
+            const now = dateParts.length === 3
+                ? new Date(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]))
+                : new Date();
+            today = now;
+            selectedDate = now;
+            shownYear = now.getFullYear();
+            shownMonth = now.getMonth();
+        }
         visible = !visible;
     }
 
+    function startEditingLifeProgress() {
+        showMementoMori = true;
+        editingLifeProgress = true;
+        lifeProgressError = "";
+        Qt.callLater(function() {
+            birthYearInput.text = SettingsData.calendarBirthYear >= 0
+                ? String(SettingsData.calendarBirthYear)
+                : "";
+            lifeExpectancyInput.text = String(SettingsData.calendarLifeExpectancy);
+            birthYearInput.selectAll();
+            birthYearInput.forceActiveFocus();
+        });
+    }
+
     function saveLifeProgress() {
-        const birthYear = Number(birthYearInput.text);
-        const expectancy = Number(lifeExpectancyInput.text);
-        if (!Number.isInteger(birthYear) || birthYear < 1900 || birthYear > today.getFullYear()) {
-            lifeProgressError = qsTr("Enter a valid birth year.");
-            return ;
+        const birthYearText = birthYearInput.text.trim();
+        const expectancyText = lifeExpectancyInput.text.trim();
+        const numberPattern = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
+        const birthYear = numberPattern.test(birthYearText) ? Number(birthYearText) : NaN;
+        const expectancy = numberPattern.test(expectancyText) ? Number(expectancyText) : NaN;
+        if (!Number.isFinite(birthYear) || birthYear < 0) {
+            lifeProgressError = qsTr("Enter a valid nonnegative birth year.");
+            return;
         }
-        if (!Number.isInteger(expectancy) || expectancy < 1 || expectancy > 150) {
-            lifeProgressError = qsTr("Life expectancy must be between 1 and 150.");
-            return ;
+        if (!Number.isFinite(expectancy) || expectancy < 0) {
+            lifeProgressError = qsTr("Enter a valid nonnegative life expectancy.");
+            return;
         }
-        SettingsData.set("calendarBirthYear", birthYear);
-        SettingsData.set("calendarLifeExpectancy", expectancy);
+        if (!SettingsData.setMany({
+            "calendarBirthYear": birthYear,
+            "calendarLifeExpectancy": expectancy
+        })) {
+            lifeProgressError = qsTr("Settings are not ready yet. Try again.");
+            return;
+        }
         editingLifeProgress = false;
         lifeProgressError = "";
+    }
+
+    function clearLifeProgress() {
+        if (SettingsData.calendarBirthYear < 0)
+            return;
+        SettingsData.set("calendarBirthYear", -1);
+        editingLifeProgress = false;
+        lifeProgressError = "";
+    }
+
+    function resetLifeProgress() {
+        return SettingsData.setMany({
+            "calendarBirthYear": -1,
+            "calendarLifeExpectancy": 90
+        });
     }
 
     function progressForYear() {
@@ -157,11 +197,21 @@ PopupWindow {
     function progressForLife() {
         const birthYear = SettingsData.calendarBirthYear;
         const expectancy = SettingsData.calendarLifeExpectancy;
-        if (birthYear < 1900 || birthYear > today.getFullYear() || expectancy < 1)
+        if (birthYear < 0 || expectancy < 0)
             return 0;
+        const age = Math.max(0, today.getFullYear() - birthYear);
+        if (expectancy === 0)
+            return age > 0 ? Infinity : 0;
+        return age / expectancy;
+    }
 
-        const age = (today.getTime() - new Date(birthYear, 0, 1).getTime()) / (365.243 * 24 * 60 * 60 * 1000);
-        return Math.max(0, Math.min(1, age / expectancy));
+    function lifeProgressLabel() {
+        const percentage = progressForLife() * 100;
+        if (!Number.isFinite(percentage))
+            return "∞%";
+        const displayedPercentage = percentage.toFixed(8)
+            .replace(/(\.\d*?[1-9])0+$|\.0+$/, "$1");
+        return displayedPercentage + "%";
     }
 
     implicitWidth: 1010
@@ -169,7 +219,7 @@ PopupWindow {
     color: "transparent"
     anchor.window: barWindow
     anchor.rect.x: Math.max(8, Math.min((barWindow ? barWindow.width : Screen.width) - implicitWidth - 8, anchorX - implicitWidth / 2))
-    anchor.rect.y: anchorY + 4
+    anchor.rect.y: anchorY + Theme.spaceXS
     visible: false
     grabFocus: true
     surfaceFormat.opaque: false
@@ -218,15 +268,18 @@ PopupWindow {
                             spacing: 4
 
                             Text {
-                                text: ClockService.timeString
+                                text: ClockService.timeWithMillisecondsString
                                 color: Theme.widgetTextColor
                                 font.family: Theme.monoFontFamily
                                 font.pixelSize: 48
                                 font.weight: Font.Bold
+                                fontSizeMode: Text.Fit
+                                minimumPixelSize: 28
+                                width: parent.parent.width - 32
                             }
 
                             Text {
-                                text: Qt.locale().dayName(root.today.getDay() === 0 ? 7 : root.today.getDay(), Locale.LongFormat) + ", " + Qt.locale().monthName(root.today.getMonth() + 1, Locale.LongFormat) + " " + root.today.getDate()
+                                text: Qt.locale().dayName(root.today.getDay() === 0 ? 7 : root.today.getDay(), Locale.LongFormat) + ", " + Qt.locale().monthName(root.today.getMonth(), Locale.LongFormat) + " " + root.today.getDate()
                                 color: Theme.widgetTextColor
                                 font.pixelSize: 13
                             }
@@ -237,12 +290,23 @@ PopupWindow {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (root.showMementoMori)
-                                    root.resetLifeProgress();
+                                if (root.showMementoMori) {
+                                    if (!root.resetLifeProgress()) {
+                                        root.startEditingLifeProgress();
+                                        root.lifeProgressError = qsTr("Settings are not ready yet. Try again.");
+                                        return;
+                                    }
+                                    root.showMementoMori = false;
+                                    root.editingLifeProgress = false;
+                                    root.lifeProgressError = "";
+                                    return;
+                                }
 
-                                root.showMementoMori = !root.showMementoMori;
-                                root.editingLifeProgress = false;
+                                root.showMementoMori = true;
+                                root.editingLifeProgress = SettingsData.calendarBirthYear < 0;
                                 root.lifeProgressError = "";
+                                if (root.editingLifeProgress)
+                                    root.startEditingLifeProgress();
                             }
                         }
 
@@ -341,7 +405,7 @@ PopupWindow {
                         height: parent.height
                         verticalAlignment: Text.AlignVCenter
                         horizontalAlignment: Text.AlignHCenter
-                        text: Qt.locale().monthName(root.shownMonth + 1, Locale.LongFormat) + " " + root.shownYear
+                        text: Qt.locale().monthName(root.shownMonth, Locale.LongFormat) + " " + root.shownYear
                         color: Theme.widgetTextColor
                         font.pixelSize: 17
                         font.weight: Font.Medium
@@ -478,12 +542,17 @@ PopupWindow {
                     Row {
                         width: parent.width
                         spacing: 9
-                        visible: true
+                        visible: !root.editingLifeProgress
+
+                        TapHandler {
+                            enabled: !root.editingLifeProgress
+                            onDoubleTapped: root.startEditingLifeProgress()
+                        }
 
                         Text {
                             width: 88
                             height: 28
-                            text: root.shownYear
+                            text: root.today.getFullYear()
                             color: Theme.widgetInactiveIconColor
                             font.pixelSize: 11
                             verticalAlignment: Text.AlignVCenter
@@ -508,9 +577,7 @@ PopupWindow {
                                     radius: parent.radius
                                     color: Theme.primary
                                 }
-
                             }
-
                         }
 
                         Text {
@@ -528,19 +595,25 @@ PopupWindow {
                     Row {
                         width: parent.width
                         spacing: 9
-                        visible: root.showMementoMori && SettingsData.calendarBirthYear > 0 && !root.editingLifeProgress
+                        visible: root.showMementoMori
+                            && SettingsData.calendarBirthYear >= 0
+                            && !root.editingLifeProgress
+
+                        TapHandler {
+                            onDoubleTapped: root.clearLifeProgress()
+                        }
 
                         Text {
                             width: 88
                             height: 28
-                            text: SettingsData.calendarBirthYear + " →"
+                            text: qsTr("LIFE")
                             color: Theme.widgetInactiveIconColor
                             font.pixelSize: 11
                             verticalAlignment: Text.AlignVCenter
                         }
 
                         Rectangle {
-                            width: parent.width - 150
+                            width: parent.width - 206
                             height: 28
                             color: "transparent"
                             anchors.verticalCenter: parent.verticalCenter
@@ -553,55 +626,63 @@ PopupWindow {
                                 color: Theme.surfaceContainerHighest
 
                                 Rectangle {
-                                    width: parent.width * root.progressForLife()
+                                    width: parent.width * Math.min(1, root.progressForLife())
                                     height: parent.height
                                     radius: parent.radius
                                     color: Theme.tertiary
                                 }
-
                             }
-
                         }
 
                         Text {
-                            width: 44
+                            width: 100
                             height: 28
-                            text: Math.round(root.progressForLife() * 100) + "%"
+                            text: root.lifeProgressLabel()
                             color: Theme.widgetInactiveIconColor
                             font.pixelSize: 11
+                            fontSizeMode: Text.Fit
+                            minimumPixelSize: 8
                             horizontalAlignment: Text.AlignRight
                             verticalAlignment: Text.AlignVCenter
                         }
-
                     }
 
                     Row {
                         width: parent.width
-                        spacing: 9
-                        visible: root.showMementoMori && (root.editingLifeProgress || SettingsData.calendarBirthYear === 0)
+                        spacing: 8
+                        visible: root.showMementoMori && root.editingLifeProgress
 
                         Text {
-                            width: 88
+                            text: qsTr("BORN")
+                            width: 48
                             height: 34
-                            text: qsTr("Memento mori")
                             color: Theme.widgetInactiveIconColor
-                            font.pixelSize: 12
+                            font.pixelSize: 11
                             verticalAlignment: Text.AlignVCenter
-                            elide: Text.ElideRight
                         }
 
                         TextField {
                             id: birthYearInput
-
-                            width: 104
+                            width: 92
                             height: 34
-                            placeholderText: qsTr("Birth year")
-                            text: SettingsData.calendarBirthYear > 0 ? String(SettingsData.calendarBirthYear) : ""
+                            placeholderText: qsTr("Year")
+                            text: SettingsData.calendarBirthYear >= 0
+                                ? String(SettingsData.calendarBirthYear) : ""
                             color: Theme.widgetTextColor
                             placeholderTextColor: Theme.widgetInactiveIconColor
-                            leftPadding: 9
-                            rightPadding: 9
+                            leftPadding: 8
+                            rightPadding: 8
                             font.pixelSize: 12
+                            inputMethodHints: Qt.ImhFormattedNumbersOnly
+                            validator: DoubleValidator {
+                                bottom: 0
+                                top: Number.MAX_VALUE
+                                decimals: 1000
+                                notation: DoubleValidator.StandardNotation
+                                locale: "C"
+                            }
+                            onAccepted: lifeExpectancyInput.forceActiveFocus()
+                            Keys.onEscapePressed: root.editingLifeProgress = false
 
                             background: Rectangle {
                                 radius: Theme.cornerRadius
@@ -609,26 +690,37 @@ PopupWindow {
                                 border.width: birthYearInput.activeFocus ? 1 : 0
                                 border.color: Theme.primary
                             }
+                        }
 
-                            validator: IntValidator {
-                                bottom: 1900
-                                top: root.today.getFullYear()
-                            }
-
+                        Text {
+                            text: qsTr("LIVE TO")
+                            height: 34
+                            color: Theme.widgetInactiveIconColor
+                            font.pixelSize: 11
+                            verticalAlignment: Text.AlignVCenter
                         }
 
                         TextField {
                             id: lifeExpectancyInput
-
-                            width: 78
+                            width: 80
                             height: 34
-                            placeholderText: qsTr("Years")
+                            placeholderText: "90"
                             text: String(SettingsData.calendarLifeExpectancy)
                             color: Theme.widgetTextColor
                             placeholderTextColor: Theme.widgetInactiveIconColor
-                            leftPadding: 9
-                            rightPadding: 9
+                            leftPadding: 8
+                            rightPadding: 8
                             font.pixelSize: 12
+                            inputMethodHints: Qt.ImhFormattedNumbersOnly
+                            validator: DoubleValidator {
+                                bottom: 0
+                                top: Number.MAX_VALUE
+                                decimals: 1000
+                                notation: DoubleValidator.StandardNotation
+                                locale: "C"
+                            }
+                            onAccepted: root.saveLifeProgress()
+                            Keys.onEscapePressed: root.editingLifeProgress = false
 
                             background: Rectangle {
                                 radius: Theme.cornerRadius
@@ -636,16 +728,10 @@ PopupWindow {
                                 border.width: lifeExpectancyInput.activeFocus ? 1 : 0
                                 border.color: Theme.primary
                             }
-
-                            validator: IntValidator {
-                                bottom: 1
-                                top: 150
-                            }
-
                         }
 
                         Rectangle {
-                            width: 48
+                            width: 56
                             height: 34
                             radius: Theme.cornerRadius
                             color: Theme.primary
@@ -659,18 +745,19 @@ PopupWindow {
 
                             MouseArea {
                                 anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
                                 onClicked: root.saveLifeProgress()
                             }
-
                         }
-
                     }
 
                     Text {
                         text: root.lifeProgressError
                         color: Theme.error
                         font.pixelSize: 11
-                        visible: root.showMementoMori && root.editingLifeProgress && text.length > 0
+                        visible: root.showMementoMori
+                            && root.editingLifeProgress
+                            && text.length > 0
                     }
 
                 }
@@ -716,7 +803,7 @@ PopupWindow {
                         Rectangle {
                             width: 32
                             height: 28
-                            radius: Theme.cornerRadius
+                            radius: Theme.hoverRadius
                             color: addEventMouse.containsMouse ? Theme.withAlpha(Theme.primary, 0.18) : "transparent"
 
                             DmsIcon {
@@ -864,7 +951,7 @@ PopupWindow {
 
                                 }
 
-                                Column {
+                                Item {
                                     width: parent.width
                                     height: parent.height
                                     visible: root.eventsForSelectedDate().length === 0 && !root.editingEvent
