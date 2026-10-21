@@ -24,7 +24,6 @@ BasePill {
   readonly property string homeMountPath: "/home/" + Quickshell.env("USER")
   readonly property var primaryMounts: [
     root.mounts.find(item => item.mount === "/") || null,
-    root.mounts.find(item => item.mount === "/boot") || null,
     root.mounts.find(item => item.mount === "/home" || item.mount === root.homeMountPath) || null
   ].filter(item => item !== null)
   readonly property var secondaryMounts: root.mounts
@@ -63,7 +62,7 @@ BasePill {
 
         Row {
           id: primaryMountRow
-          spacing: 4
+          spacing: 8
           height: root.primaryGroupHeight
 
           Repeater {
@@ -72,15 +71,26 @@ BasePill {
             delegate: Item {
               id: mountGroup
               required property var modelData
+              required property int index
               readonly property var childMounts: root.secondaryMountsFor(modelData.mount)
               readonly property real lineHeight: root.primaryLineHeight
 
-              implicitWidth: groupColumn.implicitWidth
+              implicitWidth: groupColumn.implicitWidth + (index > 0 ? 9 : 0)
               width: implicitWidth
               height: root.primaryGroupHeight
 
+              Rectangle {
+                visible: mountGroup.index > 0
+                width: 1
+                height: Math.round(root.widgetThickness * 0.55)
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                color: Theme.withAlpha(Theme.outline, 0.25)
+              }
+
               Column {
                 id: groupColumn
+                x: mountGroup.index > 0 ? 9 : 0
                 y: parent.childMounts.length > 0
                   ? 0 : (parent.height - parent.lineHeight) / 2
                 spacing: 0
@@ -123,7 +133,7 @@ BasePill {
                         anchors.centerIn: parent
                         name: "storage"
                         size: Math.max(10, Math.round(root.iconSize() * 0.65))
-                        color: Theme.widgetInactiveIconColor
+                        color: Theme.blend(root.usageColor(modelData.usage), Theme.widgetInactiveIconColor, 0.45)
                       }
                     }
 
@@ -172,14 +182,33 @@ BasePill {
 
             Repeater {
               model: root.mounts
-              delegate: Text {
+              delegate: Row {
                 required property var modelData
-                text: modelData.mount + " " + Math.round(modelData.usage) + "% "
-                  + SystemStatsService._fmtBytes(modelData.used) + "/"
-                  + SystemStatsService._fmtBytes(modelData.total)
-                color: Theme.widgetTextColor
-                font.family: Theme.monoFontFamily
-                font.pixelSize: root.textSize()
+                height: Math.max(22, root.primaryLineHeight)
+                spacing: 7
+
+                Item {
+                  width: root.iconSize()
+                  height: parent.height
+
+                  DmsIcon {
+                    anchors.centerIn: parent
+                    name: "storage"
+                    size: root.iconSize()
+                    color: root.usageColor(modelData.usage)
+                  }
+                }
+
+                Text {
+                  height: parent.height
+                  text: modelData.mount + "  " + Math.round(modelData.usage) + "%  "
+                    + SystemStatsService._fmtBytes(modelData.used) + "/"
+                    + SystemStatsService._fmtBytes(modelData.total)
+                  color: Theme.widgetTextColor
+                  font.family: Theme.monoFontFamily
+                  font.pixelSize: root.textSize()
+                  verticalAlignment: Text.AlignVCenter
+                }
               }
             }
 
@@ -215,7 +244,9 @@ BasePill {
     const homePrefix = "/home/" + Quickshell.env("USER")
     if (mount === homePrefix || mount.indexOf(homePrefix + "/") === 0)
       return root.displayMount(mount)
-    const prefix = parentMount === "/" ? "/" : parentMount + "/"
+    if (parentMount === "/")
+      return mount
+    const prefix = parentMount + "/"
     return mount.indexOf(prefix) === 0 ? mount.slice(parentMount.length) : root.displayMount(mount)
   }
 
@@ -247,7 +278,7 @@ BasePill {
       return
     const point = root.mapToItem(root.barWindow.contentItem, 0, root.height)
     root.popupX = Math.round(point.x)
-    root.popupY = Math.round(point.y)
+    root.popupY = Math.round(point.y + Theme.spaceXS)
   }
 
   Timer {
