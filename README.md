@@ -52,6 +52,8 @@ anyone distributing a shell derived from this code must release it under the
 same license with complete source, so derivative projects stay open source.
 There is no warranty, to the extent permitted by law.
 
+Copyright (C) 2026 mmj2023
+
 ## Showcase
 
 ![MyQuickshell desktop bar showcase](assets/myBar_showcase.png)
