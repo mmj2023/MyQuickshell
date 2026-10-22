@@ -45,6 +45,13 @@ changing the saved Markdown source. File dialogs default to
   portal service and a desktop-specific portal backend (such as KDE's) are
   optional and let the portal select the desktop's preferred picker.
 
+## License
+
+MyQuickshell is licensed under the [GNU General Public License v3.0](LICENSE) —
+anyone distributing a shell derived from this code must release it under the
+same license with complete source, so derivative projects stay open source.
+There is no warranty, to the extent permitted by law.
+
 ## Showcase
 
 ![MyQuickshell desktop bar showcase](assets/myBar_showcase.png)
