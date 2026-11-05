@@ -10,7 +10,11 @@ same conventions. The bar includes a Notes button that opens a file-based
 plain-text editor with tabs, Open/Save/New actions, optional line numbers,
 configurable autosave, and a Markdown preview that renders note contents without
 changing the saved Markdown source. File dialogs default to
-`~/Documents/notes/`.
+`~/Documents/notes/`. When the optional Neovim backend is available, Neovim
+handles editing modes and buffer operations while the overlay displays its
+buffer in the themed QML editor surface. The command-line prompt is rendered by
+QML and forwards Ex commands to headless Neovim; Neovim's own terminal UI is
+not embedded or rendered.
 
 > Requires a compositor with the wlr-layer-shell protocol (Hyprland, river,
 > sway, and friends all support it). Workspace state is read via `hyprctl`; the
@@ -43,6 +47,19 @@ changing the saved Markdown source. File dialogs default to
   that daemon. Battery and connected-device information remain available if
   the relevant tool is missing; the overview reports when profile control is
   unavailable.
+- **Neovim Notes backend (optional dependencies):**
+  - `nvim` (Neovim executable) runs as a headless embedded child process.
+  - Python 3 runs the repository's `Services/NotesNvimBridge.py` adapter.
+  - The Python `pynvim` package connects the adapter to Neovim's embedded RPC
+    interface. It can be installed with `python -m pip install --user pynvim`
+    or through the system's Python package manager.
+  - The adapter exchanges JSON-line requests and buffer/cursor/mode snapshots
+    with the QML `NotesService`. The QML editor forwards keyboard input and
+    cursor placement to Neovim and displays the returned buffer; its command
+    prompt forwards supported Ex commands. Neovim's own UI is not rendered.
+  - MyQuickshell does not vendor Neovim, Python, or `pynvim`. If Neovim, Python,
+    `pynvim`, or backend startup is unavailable, the Notes overlay falls back
+    to the built-in Qt Quick `TextArea` editor.
 - **Notes file chooser (optional):** Qt tries Zenity with
   `GTK_USE_PORTAL=1` first so GTK requests the desktop's default file chooser
   through `xdg-desktop-portal` when available. If that fails or is unavailable,

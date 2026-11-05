@@ -19,6 +19,158 @@ BasePill {
   readonly property bool optionsExpanded: SettingsData.notesOptionsExpanded
   readonly property bool markdownPreview: SettingsData.notesMarkdownPreview
   property string chooserInitialPath: ""
+  property bool applyingNvimState: false
+  property bool nvimCommandMode: false
+
+  function closeNvimCommandMode() {
+    root.nvimCommandMode = false
+    Qt.callLater(function() { noteEditor.forceActiveFocus() })
+  }
+
+  function executeNvimCommand() {
+    const command = nvimCommandInput.text.trim()
+    root.nvimCommandMode = false
+    nvimCommandInput.clear()
+
+    if (!command) {
+      noteEditor.forceActiveFocus()
+      return
+    }
+
+    const normalized = command.toLowerCase()
+    if (/^(w|write)(!?)$/.test(normalized)) {
+      if (!NotesService.saveAfterNvimSync())
+        root.saveNote()
+    } else if (/^(q|quit|qa|qall)(!?)$/.test(normalized)) {
+      root.setNotesVisible(false)
+    } else {
+      NotesService.runNvimCommand(command)
+    }
+    Qt.callLater(function() {
+      if (notesPopup.visible)
+        noteEditor.forceActiveFocus()
+    })
+  }
+
+  function keyForNvim(event) {
+    const specialKeys = {}
+    specialKeys[Qt.Key_Escape] = "Esc"
+    specialKeys[Qt.Key_Return] = "CR"
+    specialKeys[Qt.Key_Enter] = "CR"
+    specialKeys[Qt.Key_Backspace] = "BS"
+    specialKeys[Qt.Key_Delete] = "Del"
+    specialKeys[Qt.Key_Tab] = "Tab"
+    specialKeys[Qt.Key_Backtab] = "S-Tab"
+    specialKeys[Qt.Key_Left] = "Left"
+    specialKeys[Qt.Key_Right] = "Right"
+    specialKeys[Qt.Key_Up] = "Up"
+    specialKeys[Qt.Key_Down] = "Down"
+    specialKeys[Qt.Key_Home] = "Home"
+    specialKeys[Qt.Key_End] = "End"
+    specialKeys[Qt.Key_PageUp] = "PageUp"
+    specialKeys[Qt.Key_PageDown] = "PageDown"
+    specialKeys[Qt.Key_Insert] = "Insert"
+    specialKeys[Qt.Key_Space] = "Space"
+    if (event.key >= Qt.Key_F1 && event.key <= Qt.Key_F12)
+      specialKeys[event.key] = "F" + (event.key - Qt.Key_F1 + 1)
+
+    const keyName = specialKeys[event.key]
+    const modifiers = event.modifiers
+    const control = (modifiers & Qt.ControlModifier) !== 0
+    const alt = (modifiers & Qt.AltModifier) !== 0
+    const shift = (modifiers & Qt.ShiftModifier) !== 0
+
+    if (keyName) {
+      if ((keyName === "Tab" || keyName === "S-Tab") && shift && !control && !alt)
+        return "<S-Tab>"
+      if (keyName === "S-Tab" && !control && !alt)
+        return "<S-Tab>"
+      const prefixes = []
+      if (control) prefixes.push("C")
+      if (alt) prefixes.push("A")
+      if (shift && keyName.length > 1) prefixes.push("S")
+      return "<" + prefixes.concat(keyName).join("-") + ">"
+    }
+
+    if (control || alt) {
+      let character = event.key >= Qt.Key_A && event.key <= Qt.Key_Z
+        ? String.fromCharCode(event.key).toLowerCase()
+        : event.text
+      if (!character)
+        return ""
+      const prefixes = []
+      if (control) prefixes.push("C")
+      if (alt) prefixes.push("A")
+      if (shift) prefixes.push("S")
+      return "<" + prefixes.concat(character).join("-") + ">"
+    }
+
+    return event.text || ""
+  }
+
+  function handleEditorKey(event) {
+    const control = (event.modifiers & Qt.ControlModifier) !== 0
+    if (NotesService.nvimAvailable && NotesService.nvimMode.startsWith("n")
+        && event.text === ":") {
+      root.nvimCommandMode = true
+      nvimCommandInput.clear()
+      Qt.callLater(function() { nvimCommandInput.forceActiveFocus() })
+      event.accepted = true
+      return
+    }
+    if (control && event.key === Qt.Key_S) {
+      if (!NotesService.nvimAvailable || !NotesService.saveAfterNvimSync())
+        root.saveNote()
+      event.accepted = true
+      return
+    }
+
+    if (!NotesService.nvimAvailable && control) {
+      if (event.key === Qt.Key_O) {
+        root.openNote()
+        event.accepted = true
+      } else if (event.key === Qt.Key_N) {
+        root.newNote()
+        event.accepted = true
+      } else if (event.key === Qt.Key_F) {
+        SettingsData.set("notesSearchVisible", true)
+        event.accepted = true
+        Qt.callLater(function() { searchField.forceActiveFocus() })
+      } else if (event.key === Qt.Key_M) {
+        SettingsData.set("notesMarkdownPreview", !root.markdownPreview)
+        event.accepted = true
+      }
+      return
+    }
+
+    if (NotesService.nvimAvailable) {
+      const keys = root.keyForNvim(event)
+      if (keys) {
+        NotesService.sendNvimInput(keys)
+        event.accepted = true
+      }
+      return
+    }
+
+    if (event.key === Qt.Key_Escape)
+      root.setNotesVisible(false)
+  }
+
+  function sendNvimCursor(position) {
+    if (!NotesService.nvimAvailable || root.applyingNvimState)
+      return
+    const lines = noteEditor.text.split("\n")
+    let remaining = position
+    for (let row = 0; row < lines.length; row++) {
+      if (remaining <= lines[row].length) {
+        NotesService.setNvimCursor(row, Array.from(lines[row].slice(0, remaining)).length)
+        return
+      }
+      remaining -= lines[row].length + 1
+    }
+    const lastRow = lines.length - 1
+    NotesService.setNvimCursor(lastRow, Array.from(lines[lastRow]).length)
+  }
 
   function openNote() {
     chooserInitialPath = NotesService.notesDirectory + "/"
@@ -70,6 +222,12 @@ BasePill {
     const query = searchField.text
     if (!query)
       return
+    if (NotesService.nvimAvailable) {
+      const escapedQuery = query.replace(/</g, "<lt>").replace(/[\\/]/g, "\\$&")
+      NotesService.sendNvimInput("<Esc>/" + escapedQuery + "\n")
+      noteEditor.forceActiveFocus()
+      return
+    }
     const text = noteEditor.text
     let index = text.toLowerCase().indexOf(query.toLowerCase(), noteEditor.cursorPosition)
     if (index < 0)
@@ -97,6 +255,21 @@ BasePill {
 
   Connections {
     target: NotesService
+    function onNvimSaveRequested() { root.saveNote() }
+    function onNvimStateChanged(text, row, column, mode) {
+      root.applyingNvimState = true
+      Qt.callLater(function() {
+        const lines = noteEditor.text.split("\n")
+        const targetRow = Math.max(0, Math.min(row, lines.length - 1))
+        let position = 0
+        for (let index = 0; index < targetRow; index++)
+          position += lines[index].length + 1
+        position += Array.from(lines[targetRow]).slice(0, Math.max(0, column)).join("").length
+        noteEditor.cursorPosition = position
+        root.applyingNvimState = false
+        editorFlickable.ensureCursorVisible()
+      })
+    }
     function onFileChooserFinished(requester, operation, exitCode, output, errorOutput) {
       if (requester !== root)
         return
@@ -118,6 +291,7 @@ BasePill {
       return
     if (openVisible) {
       notesPopup.visible = true
+      NotesService.startNvimBackend()
       focusEditorTimer.restart()
     } else {
       notesPopup.visible = false
@@ -149,6 +323,7 @@ BasePill {
     target: NotesService
     function onReadyChanged() { root.focusNotesInput() }
     function onSessionLoadedChanged() { root.focusNotesInput() }
+    function onCurrentIndexChanged() { root.focusNotesInput() }
   }
 
   PanelWindow {
@@ -590,6 +765,19 @@ BasePill {
                 height: parent.height
                 text: NotesService.currentText
                 enabled: NotesService.ready
+                readOnly: NotesService.nvimAvailable
+                cursorVisible: NotesService.nvimAvailable && activeFocus
+                cursorDelegate: Rectangle {
+                  width: NotesService.nvimMode.startsWith("n")
+                    ? Math.max(2, noteEditor.font.pixelSize * 0.6)
+                    : 2
+                  height: NotesService.nvimMode.startsWith("n")
+                    ? noteEditor.font.pixelSize * 1.35
+                    : noteEditor.cursorRectangle.height
+                  color: NotesService.nvimMode.startsWith("n")
+                    ? Theme.withAlpha(Theme.primary, 0.55)
+                    : Theme.primary
+                }
                 color: Theme.widgetTextColor
                 placeholderText: qsTr("Start typing your notes here...")
                 placeholderTextColor: Theme.widgetInactiveIconColor
@@ -605,31 +793,63 @@ BasePill {
                 bottomPadding: 8
                 background: Item {}
                 onTextChanged: NotesService.editCurrentText(text)
+                onCursorPositionChanged: {
+                  editorFlickable.ensureCursorVisible()
+                  if (!root.applyingNvimState)
+                    root.sendNvimCursor(cursorPosition)
+                }
                 onCursorRectangleChanged: editorFlickable.ensureCursorVisible()
                 onContentHeightChanged: editorFlickable.ensureCursorVisible()
 
-                Keys.onEscapePressed: root.setNotesVisible(false)
-                Keys.onPressed: function(event) {
-                  if (!(event.modifiers & Qt.ControlModifier))
-                    return
-                  if (event.key === Qt.Key_S) {
-                    root.saveNote()
-                    event.accepted = true
-                  } else if (event.key === Qt.Key_O) {
-                    root.openNote()
-                    event.accepted = true
-                  } else if (event.key === Qt.Key_N) {
-                    root.newNote()
-                    event.accepted = true
-                  } else if (event.key === Qt.Key_F) {
-                    SettingsData.set("notesSearchVisible", true)
-                    event.accepted = true
-                    Qt.callLater(function() { searchField.forceActiveFocus() })
-                  } else if (event.key === Qt.Key_M) {
-                    SettingsData.set("notesMarkdownPreview", !root.markdownPreview)
-                    event.accepted = true
-                  }
-                }
+                Keys.priority: Keys.BeforeItem
+                Keys.onPressed: event => root.handleEditorKey(event)
+              }
+            }
+          }
+
+          Rectangle {
+            id: nvimCommandBar
+            visible: NotesService.nvimAvailable && root.nvimCommandMode && !root.markdownPreview
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.margins: Theme.spaceS
+            height: 36
+            radius: Theme.hoverRadius
+            color: Theme.withAlpha(Theme.widgetBaseBackgroundColor, SettingsData.barWidgetTransparency)
+            border.width: 1
+            border.color: Theme.primary
+            z: 2
+
+            Row {
+              anchors.fill: parent
+              anchors.leftMargin: Theme.spaceS
+              anchors.rightMargin: Theme.spaceS
+              spacing: Theme.spaceXS
+
+              Text {
+                height: parent.height
+                text: ":"
+                color: Theme.primary
+                font.family: Theme.monoFontFamily
+                font.pixelSize: Theme.fontSizeMedium
+                verticalAlignment: Text.AlignVCenter
+              }
+
+              TextInput {
+                id: nvimCommandInput
+                width: parent.width - Theme.spaceXL
+                height: parent.height
+                color: Theme.widgetTextColor
+                selectionColor: Theme.withAlpha(Theme.primary, 0.3)
+                selectedTextColor: Theme.widgetTextColor
+                font.family: Theme.monoFontFamily
+                font.pixelSize: Theme.fontSizeMedium
+                verticalAlignment: TextInput.AlignVCenter
+                selectByMouse: true
+                clip: true
+                onAccepted: root.executeNvimCommand()
+                Keys.onEscapePressed: root.closeNvimCommandMode()
               }
             }
           }
@@ -778,7 +998,7 @@ BasePill {
 
           Text {
             id: noteStats
-            width: parent.width * 0.38
+            width: parent.width * 0.32
             height: parent.height
             text: NotesService.currentText.length === 0
               ? qsTr("Empty")
@@ -793,14 +1013,30 @@ BasePill {
           }
 
           Text {
-            width: parent.width - noteStats.width - parent.spacing
+            width: 96
+            height: parent.height
+            text: NotesService.nvimAvailable
+              ? "Neovim · " + NotesService.nvimMode
+              : (NotesService.nvimStarting ? qsTr("Neovim…") : qsTr("TextArea"))
+            color: NotesService.nvimAvailable ? Theme.primary : Theme.widgetInactiveIconColor
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+          }
+
+          Text {
+            width: parent.width - noteStats.width - 96 - parent.spacing * 2
             height: parent.height
             text: NotesService.error !== "" ? NotesService.error
-              : (NotesService.saving ? qsTr("Saving…")
-                : (NotesService.currentDirty ? qsTr("Unsaved changes")
-                  : (NotesService.currentDocument && NotesService.currentDocument.path
-                    ? qsTr("Saved") : qsTr("New note — use Save to choose a file"))))
-            color: NotesService.error !== "" ? Theme.error
+              : (NotesService.nvimError !== "" && NotesService.nvimAvailable ? NotesService.nvimError
+                : (NotesService.saving ? qsTr("Saving…")
+                  : (NotesService.currentDirty ? qsTr("Unsaved changes")
+                    : (NotesService.currentDocument && NotesService.currentDocument.path
+                      ? qsTr("Saved") : qsTr("New note — use Save to choose a file"))))
+              )
+            color: NotesService.error !== "" || (NotesService.nvimError !== "" && NotesService.nvimAvailable)
+              ? Theme.error
               : (NotesService.currentDirty ? Theme.warning : Theme.widgetInactiveIconColor)
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall

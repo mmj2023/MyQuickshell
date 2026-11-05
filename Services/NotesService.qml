@@ -23,6 +23,13 @@ Singleton {
   property bool ready: false
   property bool sessionLoaded: false
   property bool restoringSession: false
+  property bool nvimAvailable: false
+  property bool nvimStarting: false
+  property string nvimError: ""
+  property string nvimMode: ""
+  property int _nvimRequestId: 0
+  property int _saveAfterNvimRequestId: 0
+  property int _nvimDocumentId: -1
   readonly property var currentDocument: documents.length > currentIndex ? documents[currentIndex] : null
   readonly property string currentText: currentDocument ? currentDocument.text : ""
   readonly property bool currentDirty: currentDocument ? currentDocument.text !== currentDocument.savedText : false
@@ -30,9 +37,128 @@ Singleton {
 
   signal fileChooserFinished(var requester, string operation, int exitCode, string output, string errorOutput)
   signal toggleRequested(var monitor)
+  signal nvimStateChanged(string text, int row, int column, string mode)
+  signal nvimSaveRequested()
 
-  onDocumentsChanged: scheduleSessionSave()
-  onCurrentIndexChanged: scheduleSessionSave()
+  onDocumentsChanged: {
+    scheduleSessionSave()
+    syncNvimDocument()
+  }
+  onCurrentIndexChanged: {
+    scheduleSessionSave()
+    syncNvimDocument()
+  }
+
+  function startNvimBackend() {
+    if (!nvimBridge.running && !nvimAvailable) {
+      nvimStarting = true
+      nvimError = ""
+      nvimBridge.running = true
+    }
+  }
+
+  function sendNvimRequest(operation, values) {
+    if (!nvimAvailable || !nvimBridge.running)
+      return 0
+    const request = Object.assign({ id: ++_nvimRequestId, operation: operation }, values || {})
+    nvimBridge.write(JSON.stringify(request) + "\n")
+    return request.id
+  }
+
+  function syncNvimDocument() {
+    const doc = currentDocument
+    if (!nvimAvailable || !doc || doc.id === _nvimDocumentId)
+      return
+    _nvimDocumentId = doc.id
+    sendNvimRequest("set_buffer", { text: doc.text })
+  }
+
+  function handleNvimBridgeMessage(line) {
+    let message
+    try {
+      message = JSON.parse(String(line))
+    } catch (error) {
+      console.warn("NotesService received invalid Neovim bridge output:", String(line))
+      return
+    }
+
+    if (message.type === "ready") {
+      nvimStarting = false
+      nvimAvailable = true
+      nvimError = ""
+      _nvimDocumentId = -1
+      syncNvimDocument()
+      return
+    }
+    if (message.type === "unavailable") {
+      nvimStarting = false
+      nvimAvailable = false
+      nvimError = message.message || qsTr("Neovim or its Python client is unavailable.")
+      console.info("NotesService: using the built-in editor:", nvimError)
+      return
+    }
+    if (message.type === "error") {
+      nvimError = message.message || qsTr("Neovim command failed.")
+      console.warn("NotesService Neovim bridge error:", message.message || "Unknown error")
+      return
+    }
+    if (message.type !== "snapshot")
+      return
+
+    nvimMode = String(message.mode || "")
+    nvimError = ""
+    nvimStateChanged(message.text, Number(message.row) || 0,
+      Number(message.column) || 0, nvimMode)
+    if (currentDocument && message.text !== currentDocument.text)
+      editCurrentText(message.text)
+    if (Number(message.id) === _saveAfterNvimRequestId) {
+      _saveAfterNvimRequestId = 0
+      nvimSaveRequested()
+    }
+  }
+
+  function sendNvimInput(keys) {
+    return sendNvimRequest("input", { keys: keys })
+  }
+
+  function runNvimCommand(command) {
+    return sendNvimRequest("command", { command: command })
+  }
+
+  function setNvimCursor(row, column) {
+    sendNvimRequest("set_cursor", { row: row, column: column })
+  }
+
+  function saveAfterNvimSync() {
+    const requestId = sendNvimRequest("sync")
+    if (!requestId)
+      return false
+    _saveAfterNvimRequestId = requestId
+    return true
+  }
+
+  property Process nvimBridge: Process {
+    id: nvimBridge
+    command: ["python3", "-u", Quickshell.shellDir + "/Services/NotesNvimBridge.py"]
+    stdinEnabled: true
+
+    stdout: SplitParser {
+      onRead: data => root.handleNvimBridgeMessage(data)
+    }
+    stderr: SplitParser {
+      onRead: data => console.warn("NotesService Neovim bridge:", String(data))
+    }
+    onExited: function(exitCode) {
+      if (root.nvimStarting) {
+        root.nvimStarting = false
+        root.nvimAvailable = false
+        root.nvimError = qsTr("Neovim backend exited during startup (status %1).").arg(exitCode)
+      } else if (root.nvimAvailable) {
+        root.nvimAvailable = false
+        root.nvimError = qsTr("Neovim backend stopped (status %1); using the built-in editor.").arg(exitCode)
+      }
+    }
+  }
 
   IpcHandler {
     target: "notes"
