@@ -10,3 +10,4 @@ singleton TrayService 1.0 TrayService.qml
 singleton BluetoothService 1.0 BluetoothService.qml
 singleton WorkspacesService 1.0 WorkspacesService.qml
 singleton WeatherService 1.0 WeatherService.qml
+singleton BatteryPowerService 1.0 BatteryPowerService.qml

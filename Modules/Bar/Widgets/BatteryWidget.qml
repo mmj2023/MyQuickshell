@@ -33,7 +33,12 @@ BasePill {
       UPowerDeviceType.Mouse,
       UPowerDeviceType.Speakers,
       UPowerDeviceType.Touchpad,
-      UPowerDeviceType.GamingInput
+      UPowerDeviceType.GamingInput,
+      UPowerDeviceType.Pen,
+      UPowerDeviceType.Phone,
+      UPowerDeviceType.Tablet,
+      UPowerDeviceType.MediaPlayer,
+      UPowerDeviceType.Wearable
     ]
     return UPower.devices.values.filter(device =>
       device && device.ready && !device.isLaptopBattery &&
@@ -95,6 +100,7 @@ BasePill {
       batteryDevice: UPower.displayDevice
       batteryDevices: root.batteryDevices
       accessoryDevices: root.accessoryDevices
+      active: root.overviewOpen
       onCloseRequested: root.overviewOpen = false
     }
   }
@@ -337,6 +343,16 @@ BasePill {
       return "speaker"
     case UPowerDeviceType.GamingInput:
       return "gamepad"
+    case UPowerDeviceType.Pen:
+      return "stylus"
+    case UPowerDeviceType.Phone:
+      return "smartphone"
+    case UPowerDeviceType.Tablet:
+      return "tablet"
+    case UPowerDeviceType.MediaPlayer:
+      return "media_output"
+    case UPowerDeviceType.Wearable:
+      return "watch"
     case UPowerDeviceType.BluetoothGeneric:
       return "bluetooth"
     default:

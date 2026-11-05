@@ -37,6 +37,12 @@ changing the saved Markdown source. File dialogs default to
   supporting `wlr-layer-shell`.
 - **Hyprland integration:** `hyprctl` is used for workspace state and related
   compositor actions; those widgets are unavailable outside Hyprland.
+- **Battery power modes (optional):** ASUS laptops use `asusctl` to select
+  Quiet, Balanced, and Performance profiles. Other systems use
+  `powerprofilesctl` from power-profiles-daemon for the profiles supported by
+  that daemon. Battery and connected-device information remain available if
+  the relevant tool is missing; the overview reports when profile control is
+  unavailable.
 - **Notes file chooser (optional):** Qt tries Zenity with
   `GTK_USE_PORTAL=1` first so GTK requests the desktop's default file chooser
   through `xdg-desktop-portal` when available. If that fails or is unavailable,
