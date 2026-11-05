@@ -21,8 +21,8 @@ buffers rather than Neovim tabpages, which represent window layouts. Editor
 keys and completed Ex commands are passed to Neovim for processing rather than
 reimplementing Vim motions in QML. The QML command prompt is a visible input
 surface because headless Neovim does not render its own command line. The
-Notes-specific `:w` and `:q` actions are handled by the overlay to save or
-close the note through NotesService.
+Notes-specific `:w` and `:q` actions are handled through NotesService to save
+or close the current note buffer; `:q` does not close the overlay.
 
 > Requires a compositor with the wlr-layer-shell protocol (Hyprland, river,
 > sway, and friends all support it). Workspace state is read via `hyprctl`; the

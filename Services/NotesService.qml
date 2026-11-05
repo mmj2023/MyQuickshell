@@ -114,7 +114,7 @@ Singleton {
     const documentIndex = documents.findIndex(doc => doc.id === documentId)
     if (documentIndex < 0)
       return
-    if ((message.operation === "input" || message.operation === "command_line")
+    if ((message.operation === "input" || message.operation === "command")
         && message.buffer_changed) {
       _nvimDocumentId = documentId
       if (currentIndex !== documentIndex)
@@ -138,10 +138,8 @@ Singleton {
     return sendNvimRequest("input", { keys: keys })
   }
 
-  function sendNvimCommandLine(command) {
-    return sendNvimRequest("command_line", {
-      keys: command.replace(/</g, "<lt>") + "<CR>"
-    })
+  function runNvimCommand(command) {
+    return sendNvimRequest("command", { command: command })
   }
 
   function setNvimCursor(row, column) {

@@ -136,8 +136,8 @@ def run_snapshot_worker(nvim):
                 select_document(nvim, int(request["document_id"]), request.get("text", ""))
             elif operation == "close_document":
                 close_document(nvim, int(request["document_id"]))
-            elif operation == "command_line":
-                nvim.eval("1")
+            elif operation == "command":
+                nvim.command(request["command"])
             elif operation == "set_cursor":
                 buffer = nvim.current.buffer
                 row = max(0, min(int(request["row"]), len(buffer) - 1))
@@ -147,7 +147,7 @@ def run_snapshot_worker(nvim):
                 column = max(0, min(int(request["column"]), len(line)))
                 byte_column = len(line[:column].encode("utf-8"))
                 nvim.current.window.cursor = (row + 1, byte_column)
-            elif operation != "input" and operation != "sync":
+            elif operation not in {"input", "sync"}:
                 raise ValueError(f"Unknown operation: {operation}")
 
             emit(snapshot(nvim, request_id, operation))
@@ -217,9 +217,9 @@ try:
             request_id = request.get("id")
             operation = request.get("operation")
 
-            if operation in {"input", "command_line"}:
+            if operation == "input":
                 input_nvim.input(request["keys"])
-            elif operation not in {"select_document", "close_document", "set_cursor", "sync"}:
+            elif operation not in {"select_document", "close_document", "set_cursor", "sync", "command"}:
                 raise ValueError(f"Unknown operation: {operation}")
             snapshot_tasks.put((operation, request))
         except Exception as error:

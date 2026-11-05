@@ -34,21 +34,20 @@ BasePill {
     nvimCommandInput.clear()
 
     if (!command) {
-      NotesService.sendNvimInput("<Esc>")
       noteEditor.forceActiveFocus()
       return
     }
 
     const normalized = command.toLowerCase()
     if (/^(w|write)(!?)$/.test(normalized)) {
-      NotesService.sendNvimInput("<Esc>")
       if (!NotesService.saveAfterNvimSync())
         root.saveNote()
-    } else if (/^(q|quit|qa|qall)(!?)$/.test(normalized)) {
-      NotesService.sendNvimInput("<Esc>")
+    } else if (/^(q|quit)(!?)$/.test(normalized)) {
+      NotesService.closeDocument(NotesService.currentIndex)
+    } else if (/^(qa|qall)(!?)$/.test(normalized)) {
       root.setNotesVisible(false)
     } else {
-      NotesService.sendNvimCommandLine(command)
+      NotesService.runNvimCommand(command)
     }
     Qt.callLater(function() {
       if (notesPopup.visible)
@@ -97,9 +96,13 @@ BasePill {
     }
 
     if (control || alt) {
-      let character = event.key >= Qt.Key_A && event.key <= Qt.Key_Z
-        ? String.fromCharCode(event.key).toLowerCase()
-        : event.text
+      let character = ""
+      if (event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
+        character = String.fromCharCode(event.key).toLowerCase()
+      else if (event.key >= Qt.Key_0 && event.key <= Qt.Key_9)
+        character = String.fromCharCode(event.key)
+      else
+        character = event.text
       if (!character)
         return ""
       const prefixes = []
@@ -116,7 +119,6 @@ BasePill {
     const control = (event.modifiers & Qt.ControlModifier) !== 0
     if (NotesService.nvimAvailable && NotesService.nvimMode.startsWith("n")
         && event.text === ":") {
-      NotesService.sendNvimInput(":")
       root.nvimCommandMode = true
       nvimCommandInput.clear()
       Qt.callLater(function() { nvimCommandInput.forceActiveFocus() })
