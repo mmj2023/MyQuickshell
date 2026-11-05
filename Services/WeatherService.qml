@@ -210,6 +210,7 @@ Singleton {
   }
 
   function geocodeCity(city) {
+    geocodeFetcher.requestedLocation = city
     geocodeFetcher.command = ["curl","-sf","--max-time","10",
       "https://geocoding-api.open-meteo.com/v1/search?name="+encodeURIComponent(city)+"&count=1&language=en&format=json"]
     geocodeFetcher.running = true
@@ -298,14 +299,20 @@ Singleton {
   }
 
   Process {
-    id: geocodeFetcher; running: false
+    id: geocodeFetcher
+    property string requestedLocation: ""
+    running: false
     stdout: StdioCollector {
       onStreamFinished: {
         try {
           const d = JSON.parse(text.trim())
           const r = (d.results||[])[0]
           if (!r) throw new Error("No geocoding results")
+          if (SettingsData.weatherCoordinates !== ""
+              || SettingsData.weatherLocation !== geocodeFetcher.requestedLocation)
+            return
           root.location = {city:r.name, country:r.country||"", latitude:r.latitude, longitude:r.longitude}
+          SettingsData.set("weatherCoordinates", r.latitude + "," + r.longitude)
           root.fetchWeather()
         } catch(e) { root.lastFetchError = "Geocoding failed: "+String(e) }
       }
