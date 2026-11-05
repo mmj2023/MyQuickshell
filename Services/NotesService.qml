@@ -23,7 +23,6 @@ Singleton {
   property bool ready: false
   property bool sessionLoaded: false
   property bool restoringSession: false
-  property var overlayMonitor: null
   readonly property var currentDocument: documents.length > currentIndex ? documents[currentIndex] : null
   readonly property string currentText: currentDocument ? currentDocument.text : ""
   readonly property bool currentDirty: currentDocument ? currentDocument.text !== currentDocument.savedText : false

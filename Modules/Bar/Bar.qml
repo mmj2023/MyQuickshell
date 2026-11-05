@@ -54,9 +54,6 @@ Item {
         && (activeToplevel.workspace.name !== special.name || !activeToplevel.workspace.hasFullscreen)
     }
 
-    readonly property bool notesOverlayOnMonitor: NotesService.overlayMonitor !== null
-      && NotesService.overlayMonitor === barWindow.hyprlandMonitor
-
     anchors {
       top: true
       left: true
@@ -68,7 +65,7 @@ Item {
     surfaceFormat.opaque: false
     exclusionMode: ExclusionMode.Auto
     WlrLayershell.namespace: "mybar"
-    WlrLayershell.layer: barWindow.notesOverlayOnMonitor || barWindow.specialWorkspaceOverFullscreen
+    WlrLayershell.layer: barWindow.specialWorkspaceOverFullscreen
       ? WlrLayer.Overlay : WlrLayer.Top
 
     // Center gesture area: double-click toggles bar transparency (omarchy-style).

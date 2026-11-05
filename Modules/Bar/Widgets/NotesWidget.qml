@@ -170,13 +170,6 @@ BasePill {
     focusable: visible
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
-    onVisibleChanged: {
-      const monitor = Hyprland.monitorFor(root.parentScreen)
-      if (visible)
-        NotesService.overlayMonitor = monitor
-      else if (NotesService.overlayMonitor === monitor)
-        NotesService.overlayMonitor = null
-    }
     color: "transparent"
     surfaceFormat.opaque: false
     implicitWidth: Math.min(root.expanded ? 960 : 480, Math.max(1, screenWidth - 16))
