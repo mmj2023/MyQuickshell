@@ -1,8 +1,10 @@
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
+import Quickshell.Hyprland
 import qs.Common
 import qs.Modules.Bar
+import qs.Services
 
 // The top bar. Instantiates one PanelWindow layer surface per screen via
 // Variants over Quickshell.screens. The surface background follows
@@ -13,6 +15,14 @@ Item {
   id: root
 
   readonly property int barTransparency: typeof SettingsData !== "undefined" ? (SettingsData.barTransparency || 0) : 0
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (event.name === "activespecial")
+        Hyprland.refreshMonitors()
+    }
+  }
 
   Variants {
     model: Quickshell.screens
@@ -29,6 +39,23 @@ Item {
     id: barWindow
 
     property bool isTransparent: root.barTransparency === 0
+    readonly property var hyprlandMonitor: Hyprland.monitorFor(barWindow.screen)
+    readonly property var specialWorkspace: barWindow.hyprlandMonitor?.lastIpcObject?.specialWorkspace
+    readonly property bool specialWorkspaceOverFullscreen: {
+      const special = barWindow.specialWorkspace
+      const monitor = barWindow.hyprlandMonitor
+      const activeToplevel = Hyprland.activeToplevel
+      if (!monitor || !special || !activeToplevel || !activeToplevel.workspace)
+        return false
+      return !!monitor
+        && !!monitor.activeWorkspace?.hasFullscreen
+        && special.id !== 0
+        && special.name.startsWith("special:")
+        && (activeToplevel.workspace.name !== special.name || !activeToplevel.workspace.hasFullscreen)
+    }
+
+    readonly property bool notesOverlayOnMonitor: NotesService.overlayMonitor !== null
+      && NotesService.overlayMonitor === barWindow.hyprlandMonitor
 
     anchors {
       top: true
@@ -41,7 +68,8 @@ Item {
     surfaceFormat.opaque: false
     exclusionMode: ExclusionMode.Auto
     WlrLayershell.namespace: "mybar"
-    WlrLayershell.layer: WlrLayer.Top
+    WlrLayershell.layer: barWindow.notesOverlayOnMonitor || barWindow.specialWorkspaceOverFullscreen
+      ? WlrLayer.Overlay : WlrLayer.Top
 
     // Center gesture area: double-click toggles bar transparency (omarchy-style).
     // Declared before the body so it sits behind the widgets in z, catching only

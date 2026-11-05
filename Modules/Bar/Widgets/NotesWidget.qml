@@ -3,6 +3,8 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtCore
 import Quickshell
+import Quickshell.Hyprland
+import Quickshell.Wayland
 import qs.Common
 import qs.Modules.Bar.Widgets
 import qs.Services
@@ -12,10 +14,10 @@ BasePill {
 
   property var barWindow: null
   property var parentScreen: null
-  property bool expanded: false
-  property bool searchVisible: false
-  property bool optionsExpanded: false
-  property bool markdownPreview: false
+  readonly property bool expanded: SettingsData.notesExpanded
+  readonly property bool searchVisible: SettingsData.notesSearchVisible
+  readonly property bool optionsExpanded: SettingsData.notesOptionsExpanded
+  readonly property bool markdownPreview: SettingsData.notesMarkdownPreview
   property string chooserInitialPath: ""
 
   function openNote() {
@@ -102,7 +104,9 @@ BasePill {
         String(errorOutput || "").trim() || ("exit status " + exitCode))
       root.fallbackToQtFileDialog(operation, root.chooserInitialPath)
     }
-    function onToggleRequested() {
+    function onToggleRequested(monitor) {
+      if (monitor && Hyprland.monitorFor(root.parentScreen) !== monitor)
+        return
       root.setNotesVisible(!notesPopup.visible)
     }
   }
@@ -113,42 +117,66 @@ BasePill {
     if (notesPopup.visible === openVisible)
       return
     if (openVisible) {
-      // Attach first (no grab); a deferred grab one event-loop pass later
-      // fires after the attach completes, so the editor gets keyboard focus
-      // on both click and keybind paths.
       notesPopup.visible = true
-      Qt.callLater(function() {
-        notesPopup.grabFocus = true
-        noteEditor.forceActiveFocus()
-      })
+      focusEditorTimer.restart()
     } else {
       notesPopup.visible = false
+      focusEditorTimer.stop()
     }
   }
 
-  // IPC/keyboard toggles go through the plain PopupWindow here: grab-based
-  // anchoring is what bar-click popups use, keep it consistent.
-  PopupWindow {
+  function focusNotesInput() {
+    if (!notesPopup.visible)
+      return
+    if (!NotesService.ready || !NotesService.sessionLoaded) {
+      focusEditorTimer.restart()
+      return
+    }
+    if (root.searchVisible)
+      searchField.forceActiveFocus(Qt.PopupFocusReason)
+    else if (!root.markdownPreview)
+      noteEditor.forceActiveFocus(Qt.PopupFocusReason)
+  }
+
+  Timer {
+    id: focusEditorTimer
+    interval: 100
+    repeat: false
+    onTriggered: root.focusNotesInput()
+  }
+
+  Connections {
+    target: NotesService
+    function onReadyChanged() { root.focusNotesInput() }
+    function onSessionLoadedChanged() { root.focusNotesInput() }
+  }
+
+  PanelWindow {
     id: notesPopup
 
     readonly property real screenWidth: root.parentScreen ? root.parentScreen.width : Screen.width
     readonly property real screenHeight: root.parentScreen ? root.parentScreen.height : Screen.height
 
-    anchor.window: root.barWindow
-    anchor.rect.x: Math.max(8, screenWidth - implicitWidth - 8)
-    anchor.rect.y: root.barWindow ? root.barWindow.height + Theme.spaceXS : Theme.spaceXS
+    screen: root.parentScreen
+    anchors {
+      top: true
+      right: true
+    }
+    margins {
+      top: Theme.spaceXS
+      right: Theme.spaceS
+    }
     visible: false
-    // Open without a grab (the only attach that succeeds from an IPC toggle),
-    // then request the keyboard grab AFTER the attach completes -- a deferred
-    // one event-loop pass, which PopupWindow 0.3 has no onOpened for.
-    //
-    // Known quirk (Wayland grab-popup input serial): a client-initiated toggle
-    // carries no seat input serial, so after a fresh shell start the keyboard
-    // grab is refused ("Failed to create grabbing popup ... parent window has
-    // received input") until one real interaction -- clicking the bar button
-    // once warms it up, after which every super+shift+n toggle works with
-    // full typing focus for the rest of the session. Restarting resets it.
-    grabFocus: false
+    focusable: visible
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    onVisibleChanged: {
+      const monitor = Hyprland.monitorFor(root.parentScreen)
+      if (visible)
+        NotesService.overlayMonitor = monitor
+      else if (NotesService.overlayMonitor === monitor)
+        NotesService.overlayMonitor = null
+    }
     color: "transparent"
     surfaceFormat.opaque: false
     implicitWidth: Math.min(root.expanded ? 960 : 480, Math.max(1, screenWidth - 16))
@@ -202,7 +230,7 @@ BasePill {
               anchors.fill: parent
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
-              onClicked: root.expanded = !root.expanded
+              onClicked: SettingsData.set("notesExpanded", !root.expanded)
             }
           }
 
@@ -225,7 +253,7 @@ BasePill {
               anchors.fill: parent
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
-              onClicked: notesPopup.visible = false
+              onClicked: root.setNotesVisible(false)
             }
           }
         }
@@ -383,7 +411,7 @@ BasePill {
               background: Item {}
               onAccepted: root.findNext()
               Keys.onEscapePressed: {
-                root.searchVisible = false
+                SettingsData.set("notesSearchVisible", false)
                 noteEditor.forceActiveFocus()
               }
             }
@@ -431,7 +459,7 @@ BasePill {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                  root.searchVisible = false
+                  SettingsData.set("notesSearchVisible", false)
                   noteEditor.forceActiveFocus()
                 }
               }
@@ -498,8 +526,8 @@ BasePill {
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
               onClicked: {
-                root.searchVisible = true
-                root.optionsExpanded = false
+                SettingsData.set("notesSearchVisible", true)
+                SettingsData.set("notesOptionsExpanded", false)
                 Qt.callLater(function() { searchField.forceActiveFocus() })
               }
             }
@@ -527,6 +555,16 @@ BasePill {
             contentWidth: width
             contentHeight: editorRow.height
             flickableDirection: Flickable.VerticalFlick
+
+            function ensureCursorVisible() {
+              const cursor = noteEditor.cursorRectangle
+              const visibleTop = contentY
+              const visibleBottom = contentY + height
+              if (cursor.y < visibleTop)
+                contentY = Math.max(0, cursor.y)
+              else if (cursor.y + cursor.height > visibleBottom)
+                contentY = Math.max(0, Math.min(contentHeight - height, cursor.y + cursor.height - height))
+            }
 
             Row {
               id: editorRow
@@ -574,8 +612,10 @@ BasePill {
                 bottomPadding: 8
                 background: Item {}
                 onTextChanged: NotesService.editCurrentText(text)
+                onCursorRectangleChanged: editorFlickable.ensureCursorVisible()
+                onContentHeightChanged: editorFlickable.ensureCursorVisible()
 
-                Keys.onEscapePressed: notesPopup.visible = false
+                Keys.onEscapePressed: root.setNotesVisible(false)
                 Keys.onPressed: function(event) {
                   if (!(event.modifiers & Qt.ControlModifier))
                     return
@@ -589,11 +629,11 @@ BasePill {
                     root.newNote()
                     event.accepted = true
                   } else if (event.key === Qt.Key_F) {
-                    root.searchVisible = true
+                    SettingsData.set("notesSearchVisible", true)
                     event.accepted = true
                     Qt.callLater(function() { searchField.forceActiveFocus() })
                   } else if (event.key === Qt.Key_M) {
-                    root.markdownPreview = !root.markdownPreview
+                    SettingsData.set("notesMarkdownPreview", !root.markdownPreview)
                     event.accepted = true
                   }
                 }
@@ -701,7 +741,7 @@ BasePill {
                       else if (actionButton.modelData.id === "autosave")
                         root.setAutoSave(!SettingsData.notesAutoSave)
                       else if (actionButton.modelData.id === "preview")
-                        root.markdownPreview = !root.markdownPreview
+                        SettingsData.set("notesMarkdownPreview", !root.markdownPreview)
                       else
                         root.newNote()
                     }
@@ -730,7 +770,7 @@ BasePill {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.optionsExpanded = !root.optionsExpanded
+                onClicked: SettingsData.set("notesOptionsExpanded", !root.optionsExpanded)
               }
             }
           }

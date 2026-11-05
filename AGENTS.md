@@ -1,5 +1,23 @@
 # Shared agent instructions for MyQuickshell
 
+Personal workspace behavior and live-Hyprland safety requirements are
+versioned in `~/dotfiles/agent-guidance/AGENTS.md`. Read that file and its
+`myquickshell-bar-and-notes` skill before changing bar layering, special
+workspaces, fullscreen behavior, or Notes. In particular, keep the bar below
+ordinary fullscreen windows; raise it only on a monitor where a visible
+special workspace overlays a fullscreen regular workspace, and hide it when a
+window on that special workspace is fullscreen. Never run
+`hyprctl` or perform a live compositor action without the user's explicit
+permission for that specific action.
+
+Hyprland on this host uses Lua-based configuration and control APIs. Do not
+apply old dispatcher/config syntax from older versions; find the current
+version's Lua API and signatures from offline documentation/source because
+they may change. Do not probe APIs or enumerate/introspect C-backed objects
+against the live compositor: this kind of exploration has crashed Hyprland.
+Avoid live path-finding; if truly necessary, ask permission for the exact
+action before doing it.
+
 All AI coding agents working in this repository must follow these shared UI
 theming and spacing rules, in addition to any tool-specific instructions.
 

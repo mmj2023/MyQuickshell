@@ -23,13 +23,14 @@ Singleton {
   property bool ready: false
   property bool sessionLoaded: false
   property bool restoringSession: false
+  property var overlayMonitor: null
   readonly property var currentDocument: documents.length > currentIndex ? documents[currentIndex] : null
   readonly property string currentText: currentDocument ? currentDocument.text : ""
   readonly property bool currentDirty: currentDocument ? currentDocument.text !== currentDocument.savedText : false
   readonly property bool saving: _pendingWrites > 0
 
   signal fileChooserFinished(var requester, string operation, int exitCode, string output, string errorOutput)
-  signal toggleRequested()
+  signal toggleRequested(var monitor)
 
   onDocumentsChanged: scheduleSessionSave()
   onCurrentIndexChanged: scheduleSessionSave()
@@ -38,20 +39,18 @@ Singleton {
     target: "notes"
 
     function toggle(): string {
-      root.toggleRequested()
+      root.toggleRequested(Hyprland.focusedMonitor)
       return "Toggled MyQuickshell notes overlay"
     }
   }
 
-  // Compositor-routed keybind (hyprctl dispatch global quickshell:notes):
-  // Hyprland hands the keypress to Quickshell itself, satisfying the
-  // popup's "parent window has received input" gate like a bar click does.
+  // Allows Hyprland to toggle the overlay without depending on DMS.
   GlobalShortcut {
     appid: "quickshell"
     name: "notes"
     description: "Toggle the MyQuickshell notes overlay"
 
-    onPressed: root.toggleRequested()
+    onPressed: root.toggleRequested(Hyprland.focusedMonitor)
   }
 
   function localPath(url) {
