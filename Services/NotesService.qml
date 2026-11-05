@@ -28,6 +28,7 @@ Singleton {
   property string nvimError: ""
   property string nvimMode: ""
   property int _nvimRequestId: 0
+  property int _nvimSelectionRequestId: 0
   property int _saveAfterNvimRequestId: 0
   property int _nvimDocumentId: -1
   readonly property var currentDocument: documents.length > currentIndex ? documents[currentIndex] : null
@@ -70,7 +71,8 @@ Singleton {
     if (!nvimAvailable || !doc || doc.id === _nvimDocumentId)
       return
     _nvimDocumentId = doc.id
-    sendNvimRequest("set_buffer", { text: doc.text })
+    _nvimSelectionRequestId = sendNvimRequest(
+      "select_document", { document_id: doc.id, text: doc.text })
   }
 
   function handleNvimBridgeMessage(line) {
@@ -105,12 +107,27 @@ Singleton {
     if (message.type !== "snapshot")
       return
 
+    if (Number(message.id) < _nvimSelectionRequestId)
+      return
+
+    const documentId = Number(message.document_id)
+    const documentIndex = documents.findIndex(doc => doc.id === documentId)
+    if (documentIndex < 0)
+      return
+    if ((message.operation === "input" || message.operation === "command_line")
+        && message.buffer_changed) {
+      _nvimDocumentId = documentId
+      if (currentIndex !== documentIndex)
+        currentIndex = documentIndex
+    }
+
     nvimMode = String(message.mode || "")
     nvimError = ""
     nvimStateChanged(message.text, Number(message.row) || 0,
       Number(message.column) || 0, nvimMode)
-    if (currentDocument && message.text !== currentDocument.text)
-      editCurrentText(message.text)
+    const document = documents[documentIndex]
+    if (message.text !== document.text)
+      editDocumentText(documentId, message.text)
     if (Number(message.id) === _saveAfterNvimRequestId) {
       _saveAfterNvimRequestId = 0
       nvimSaveRequested()
@@ -121,12 +138,18 @@ Singleton {
     return sendNvimRequest("input", { keys: keys })
   }
 
-  function runNvimCommand(command) {
-    return sendNvimRequest("command", { command: command })
+  function sendNvimCommandLine(command) {
+    return sendNvimRequest("command_line", {
+      keys: command.replace(/</g, "<lt>") + "<CR>"
+    })
   }
 
   function setNvimCursor(row, column) {
     sendNvimRequest("set_cursor", { row: row, column: column })
+  }
+
+  function closeNvimDocument(documentId) {
+    sendNvimRequest("close_document", { document_id: documentId })
   }
 
   function saveAfterNvimSync() {
@@ -335,6 +358,8 @@ Singleton {
       error = qsTr("Save changes before closing this note.")
       return
     }
+    if (nvimAvailable)
+      closeNvimDocument(documents[index].id)
     const next = documents.slice()
     next.splice(index, 1)
     documents = next
@@ -351,6 +376,12 @@ Singleton {
 
   function editCurrentText(value) {
     const doc = currentDocument
+    if (doc)
+      editDocumentText(doc.id, value)
+  }
+
+  function editDocumentText(documentId, value) {
+    const doc = documents.find(item => item.id === documentId)
     if (!ready || !doc || value === doc.text)
       return
     updateDocument(doc.id, { text: value })

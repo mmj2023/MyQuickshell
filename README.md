@@ -14,7 +14,15 @@ changing the saved Markdown source. File dialogs default to
 handles editing modes and buffer operations while the overlay displays its
 buffer in the themed QML editor surface. The command-line prompt is rendered by
 QML and forwards Ex commands to headless Neovim; Neovim's own terminal UI is
-not embedded or rendered.
+not embedded or rendered. Each Notes document maps to a Neovim buffer: the
+QML document tabs select those buffers, and Neovim buffer navigation (such as
+`:bnext` and `:bprevious`) also selects the matching Notes tab. These are
+buffers rather than Neovim tabpages, which represent window layouts. Editor
+keys and completed Ex commands are passed to Neovim for processing rather than
+reimplementing Vim motions in QML. The QML command prompt is a visible input
+surface because headless Neovim does not render its own command line. The
+Notes-specific `:w` and `:q` actions are handled by the overlay to save or
+close the note through NotesService.
 
 > Requires a compositor with the wlr-layer-shell protocol (Hyprland, river,
 > sway, and friends all support it). Workspace state is read via `hyprctl`; the
@@ -54,9 +62,12 @@ not embedded or rendered.
     interface. It can be installed with `python -m pip install --user pynvim`
     or through the system's Python package manager.
   - The adapter exchanges JSON-line requests and buffer/cursor/mode snapshots
-    with the QML `NotesService`. The QML editor forwards keyboard input and
-    cursor placement to Neovim and displays the returned buffer; its command
-    prompt forwards supported Ex commands. Neovim's own UI is not rendered.
+    with the QML `NotesService`. Each Notes document has a corresponding
+    Neovim buffer. The QML editor forwards keyboard input and cursor placement
+    to Neovim and displays the returned buffer; its command prompt forwards
+    Ex commands, including buffer navigation. Input and state snapshots use
+    separate Neovim RPC connections so pending multi-key commands do not block
+    later keystrokes. Neovim's own UI is not rendered.
   - MyQuickshell does not vendor Neovim, Python, or `pynvim`. If Neovim, Python,
     `pynvim`, or backend startup is unavailable, the Notes overlay falls back
     to the built-in Qt Quick `TextArea` editor.

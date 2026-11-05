@@ -23,6 +23,7 @@ BasePill {
   property bool nvimCommandMode: false
 
   function closeNvimCommandMode() {
+    NotesService.sendNvimInput("<Esc>")
     root.nvimCommandMode = false
     Qt.callLater(function() { noteEditor.forceActiveFocus() })
   }
@@ -33,18 +34,21 @@ BasePill {
     nvimCommandInput.clear()
 
     if (!command) {
+      NotesService.sendNvimInput("<Esc>")
       noteEditor.forceActiveFocus()
       return
     }
 
     const normalized = command.toLowerCase()
     if (/^(w|write)(!?)$/.test(normalized)) {
+      NotesService.sendNvimInput("<Esc>")
       if (!NotesService.saveAfterNvimSync())
         root.saveNote()
     } else if (/^(q|quit|qa|qall)(!?)$/.test(normalized)) {
+      NotesService.sendNvimInput("<Esc>")
       root.setNotesVisible(false)
     } else {
-      NotesService.runNvimCommand(command)
+      NotesService.sendNvimCommandLine(command)
     }
     Qt.callLater(function() {
       if (notesPopup.visible)
@@ -112,6 +116,7 @@ BasePill {
     const control = (event.modifiers & Qt.ControlModifier) !== 0
     if (NotesService.nvimAvailable && NotesService.nvimMode.startsWith("n")
         && event.text === ":") {
+      NotesService.sendNvimInput(":")
       root.nvimCommandMode = true
       nvimCommandInput.clear()
       Qt.callLater(function() { nvimCommandInput.forceActiveFocus() })
