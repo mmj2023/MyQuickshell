@@ -820,7 +820,7 @@ BasePill {
               model: root.audioSinks.map(node => node.description || node.nickname || node.name)
               currentIndex: root.audioSinks.indexOf(Pipewire.defaultAudioSink)
               onActivated: index => Pipewire.preferredDefaultAudioSink = root.audioSinks[index]
-              contentItem: Text {
+              contentItem: TextInput {
                 leftPadding: 10
                 rightPadding: 30
                 text: sinkSelector.currentText
@@ -828,7 +828,12 @@ BasePill {
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
                 verticalAlignment: Text.AlignVCenter
-                elide: Text.ElideRight
+                enabled: false
+                autoScroll: false
+                readOnly: true
+                selectByMouse: false
+                cursorVisible: false
+                clip: true
               }
               indicator: DmsIcon {
                 x: sinkSelector.width - width - 8

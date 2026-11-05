@@ -26,10 +26,15 @@ BasePill {
   readonly property var players: Mpris.players ? Mpris.players.values : []
   readonly property var audioSinks: Pipewire.nodes ? Pipewire.nodes.values.filter(node => node.audio && node.isSink && !node.isStream) : []
   readonly property var player: root.activePlayer()
+  readonly property string baseArtworkUrl: root.resolveArtworkUrl(root.player)
+  readonly property string artworkUrl: root.useArtworkFallback
+    ? root.lowerResolutionArtworkUrl(root.baseArtworkUrl)
+    : root.baseArtworkUrl
   readonly property bool hasMedia: !!root.player && String(root.player.trackTitle || "").trim() !== ""
   readonly property bool lyricsAvailable: LyricsService.hasLyrics
   property bool overviewOpen: false
   property bool lyricsOpen: false
+  property bool useArtworkFallback: false
   property var selectedPlayer: null
   property int popupX: 0
   property int popupY: 0
@@ -38,9 +43,44 @@ BasePill {
 
   Component.onCompleted: LyricsService.setPlayer(root.player)
   onPlayerChanged: LyricsService.setPlayer(root.player)
+  onBaseArtworkUrlChanged: root.useArtworkFallback = false
   onLyricsAvailableChanged: {
     if (!root.lyricsAvailable)
       root.lyricsOpen = false
+  }
+
+  function resolveArtworkUrl(player) {
+    if (!player)
+      return ""
+
+    let url = String(player.trackArtUrl || "").trim()
+    const metadata = player.metadata
+    if (!url && metadata && metadata["mpris:artUrl"])
+      url = String(metadata["mpris:artUrl"]).trim()
+
+    if (url)
+      return url
+
+    const trackUrl = metadata && metadata["xesam:url"]
+      ? String(metadata["xesam:url"])
+      : ""
+    if (trackUrl.includes("youtube.com") || trackUrl.includes("youtu.be")) {
+      const match = trackUrl.match(/^.*(youtu\.be\/|v\/|u\/\w\/|embed\/|shorts\/|watch\?v=|&v=)([^#&?]*).*/)
+      if (match && match[2].length === 11)
+        return "https://img.youtube.com/vi/" + match[2] + "/maxresdefault.jpg"
+    }
+
+    return ""
+  }
+
+  function lowerResolutionArtworkUrl(url) {
+    return url.replace("/maxresdefault.jpg", "/hqdefault.jpg")
+  }
+
+  function fallbackFromLowResolutionArtwork(width) {
+    if (root.baseArtworkUrl.includes("img.youtube.com/vi/") &&
+        !root.useArtworkFallback && width < 640)
+      root.useArtworkFallback = true
   }
 
   Timer {
@@ -113,13 +153,21 @@ BasePill {
         Image {
           id: backdropImage
           anchors.fill: parent
-          source: root.player ? root.player.trackArtUrl : ""
+          source: root.artworkUrl
           fillMode: Image.PreserveAspectCrop
-          sourceSize.width: 960
-          sourceSize.height: 540
+          sourceSize: Qt.size(
+            Math.round(width * Theme.screenScaleOf(root.parentScreen)),
+            Math.round(height * Theme.screenScaleOf(root.parentScreen))
+          )
           asynchronous: true
           cache: true
           visible: status === Image.Ready
+          onStatusChanged: {
+            if (status === Image.Error)
+              root.fallbackFromLowResolutionArtwork(0)
+            else if (status === Image.Ready)
+              root.fallbackFromLowResolutionArtwork(implicitWidth)
+          }
         }
       }
     }
@@ -194,7 +242,7 @@ BasePill {
           visible: root.audioSinks.length > 1
           model: root.audioSinks.map(sink => sink.description || sink.nickname || sink.name)
           currentIndex: root.audioSinks.indexOf(Pipewire.defaultAudioSink)
-          contentItem: Text {
+          contentItem: TextInput {
             leftPadding: 10
             rightPadding: 30
             text: outputSelector.currentText || "Output device"
@@ -202,7 +250,12 @@ BasePill {
             font.family: Theme.fontFamily
             font.pixelSize: 12
             verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
+            enabled: false
+            autoScroll: false
+            readOnly: true
+            selectByMouse: false
+            cursorVisible: false
+            clip: true
           }
           indicator: DmsIcon {
             x: outputSelector.width - width - 8
@@ -286,11 +339,21 @@ BasePill {
         Image {
           id: artworkImage
           anchors.fill: parent
-          source: root.player ? root.player.trackArtUrl : ""
+          source: root.artworkUrl
           fillMode: Image.PreserveAspectCrop
+          sourceSize: Qt.size(
+            Math.round(width * Theme.screenScaleOf(root.parentScreen)),
+            Math.round(height * Theme.screenScaleOf(root.parentScreen))
+          )
           asynchronous: true
           cache: true
           visible: status === Image.Ready
+          onStatusChanged: {
+            if (status === Image.Error)
+              root.fallbackFromLowResolutionArtwork(0)
+            else if (status === Image.Ready)
+              root.fallbackFromLowResolutionArtwork(implicitWidth)
+          }
         }
 
         DmsIcon {
@@ -327,7 +390,7 @@ BasePill {
           root.selectedPlayer = root.players[index] || null
           LyricsService.setPlayer(root.player)
         }
-        contentItem: Text {
+        contentItem: TextInput {
           leftPadding: 12
           rightPadding: 30
           text: playerSelector.currentText
@@ -335,7 +398,12 @@ BasePill {
           font.family: Theme.fontFamily
           font.pixelSize: 13
           verticalAlignment: Text.AlignVCenter
-          elide: Text.ElideRight
+          enabled: false
+          autoScroll: false
+          readOnly: true
+          selectByMouse: false
+          cursorVisible: false
+          clip: true
         }
         indicator: DmsIcon {
           x: playerSelector.width - width - 8
