@@ -24,6 +24,7 @@ buffer_documents = {}
 pending_reuse_buffer = None
 last_snapshot_buffer = None
 highlight_cache = {}
+search_highlight_cache = {}
 visible_highlight_ranges = {}
 command_completion_query = ""
 command_completion_visible = False
@@ -204,6 +205,208 @@ def syntax_highlights(nvim, buffer, start_row, end_row):
     ]
 
 
+def search_highlights(nvim, buffer, command_type, command_line):
+    changedtick = nvim.api.buf_get_changedtick(buffer)
+    cached = search_highlight_cache.get(buffer)
+    window = nvim.current.window
+    if cached is not None and cached["changedtick"] == changedtick:
+        cache_key = (
+            command_type,
+            command_line,
+            bool(nvim.options["hlsearch"]),
+            bool(nvim.options["incsearch"]),
+            str(nvim.options["inccommand"]),
+            int(nvim.eval("v:hlsearch")),
+            str(nvim.call("getreg", "/")),
+            bool(nvim.options["ignorecase"]),
+            bool(nvim.options["smartcase"]),
+            bool(nvim.options["magic"]),
+            bool(window.options["number"]),
+            bool(window.options["relativenumber"]),
+            bool(window.options["wrap"]),
+            bool(window.options["cursorline"]),
+            bool(window.options["list"]),
+            bool(window.options["spell"]),
+            int(nvim.current.buffer.options["tabstop"]),
+            int(nvim.current.buffer.options["shiftwidth"]),
+            bool(nvim.current.buffer.options["expandtab"]),
+        )
+        if cached["key"] == cache_key:
+            return cached["spans"], cached["options"]
+
+    result = nvim.exec_lua("""
+        local buffer, command_type, command_line = ...
+        local window = vim.api.nvim_get_current_win()
+        local options = {
+            number = vim.wo[window].number,
+            relativenumber = vim.wo[window].relativenumber,
+            wrap = vim.wo[window].wrap,
+            cursorline = vim.wo[window].cursorline,
+            list = vim.wo[window].list,
+            spell = vim.wo[window].spell,
+            hlsearch = vim.o.hlsearch,
+            incsearch = vim.o.incsearch,
+            inccommand = vim.o.inccommand,
+            ignorecase = vim.o.ignorecase,
+            smartcase = vim.o.smartcase,
+            tabstop = vim.bo[buffer].tabstop,
+            shiftwidth = vim.bo[buffer].shiftwidth,
+            expandtab = vim.bo[buffer].expandtab,
+        }
+
+        local pattern = nil
+        local group = nil
+        if (command_type == "/" or command_type == "?")
+            and command_line ~= "" and options.incsearch then
+            pattern = command_line
+            group = "IncSearch"
+        elseif command_type == ":" and options.inccommand ~= "" then
+            local ok, parsed = pcall(vim.api.nvim_parse_cmd, command_line, {})
+            if ok and (parsed.cmd == "substitute"
+                or parsed.cmd == "smagic" or parsed.cmd == "snomagic") then
+                local raw = parsed.args[1] or ""
+                if raw ~= "" then
+                    local delimiter = raw:sub(1, 1)
+                    local escaped = false
+                    local parts = {}
+                    local part = {}
+                    for index = 2, #raw do
+                        local character = raw:sub(index, index)
+                        if escaped then
+                            if character ~= delimiter then
+                                table.insert(part, "\\\\")
+                            end
+                            table.insert(part, character)
+                            escaped = false
+                        elseif character == "\\\\" then
+                            escaped = true
+                        elseif character == delimiter then
+                            table.insert(parts, table.concat(part))
+                            part = {}
+                            if #parts == 2 then
+                                break
+                            end
+                        else
+                            table.insert(part, character)
+                        end
+                    end
+                    if escaped then
+                        table.insert(part, "\\\\")
+                    end
+                    if #parts > 0 then
+                        pattern = parts[1] ~= "" and parts[1] or vim.fn.getreg("/")
+                        group = "IncSearch"
+                    else
+                        pattern = table.concat(part)
+                        if pattern == "" then
+                            pattern = vim.fn.getreg("/")
+                        end
+                        group = "IncSearch"
+                    end
+                else
+                    pattern = vim.fn.getreg("/")
+                    group = "IncSearch"
+                end
+            end
+        end
+
+        if not pattern and options.hlsearch and vim.v.hlsearch ~= 0 then
+            pattern = vim.fn.getreg("/")
+            group = "Search"
+        end
+
+        local spans = {}
+        if pattern and pattern ~= "" then
+            local lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
+            local text = table.concat(lines, "\\n")
+            local line_starts = { 0 }
+            for index = 1, #text do
+                if text:byte(index) == 10 then
+                    table.insert(line_starts, index)
+                end
+            end
+
+            local function position_at(byte_offset)
+                local low = 1
+                local high = #line_starts
+                while low < high do
+                    local middle = math.floor((low + high + 1) / 2)
+                    if line_starts[middle] <= byte_offset then
+                        low = middle
+                    else
+                        high = middle - 1
+                    end
+                end
+                local row = low - 1
+                local byte_column = byte_offset - line_starts[low]
+                local column = vim.str_utfindex(lines[low] or "", "utf-32", byte_column)
+                return row, column
+            end
+
+            local offset = 0
+            while offset <= #text do
+                local ok, found = pcall(vim.fn.matchstrpos, text, pattern, offset)
+                if not ok or not found or found[2] < 0 then
+                    break
+                end
+                local start_byte = found[2]
+                local end_byte = found[3]
+                if end_byte > start_byte then
+                    local start_row, start_column = position_at(start_byte)
+                    local end_row, end_column = position_at(end_byte)
+                    for row = start_row, end_row do
+                        local first_column = row == start_row and start_column or 0
+                        local last_column = row == end_row
+                            and end_column
+                            or vim.str_utfindex(lines[row + 1] or "", "utf-32")
+                        if last_column > first_column then
+                            table.insert(spans, {
+                                row = row,
+                                start_column = first_column,
+                                end_column = last_column,
+                                group = group,
+                            })
+                        end
+                    end
+                end
+                offset = math.max(end_byte, start_byte + 1)
+            end
+        end
+        return { spans = spans, options = options }
+    """, buffer, command_type, command_line)
+    spans = result["spans"]
+    options = result["options"]
+
+    cache_key = (
+        command_type,
+        command_line,
+        bool(nvim.options["hlsearch"]),
+        bool(nvim.options["incsearch"]),
+        str(nvim.options["inccommand"]),
+        int(nvim.eval("v:hlsearch")),
+        str(nvim.call("getreg", "/")),
+        bool(nvim.options["ignorecase"]),
+        bool(nvim.options["smartcase"]),
+        bool(nvim.options["magic"]),
+        bool(window.options["number"]),
+        bool(window.options["relativenumber"]),
+        bool(window.options["wrap"]),
+        bool(window.options["cursorline"]),
+        bool(window.options["list"]),
+        bool(window.options["spell"]),
+        int(nvim.current.buffer.options["tabstop"]),
+        int(nvim.current.buffer.options["shiftwidth"]),
+        bool(nvim.current.buffer.options["expandtab"]),
+    )
+    search_highlight_cache[buffer] = {
+        "changedtick": changedtick,
+        "key": cache_key,
+        "spans": spans,
+        "options": options,
+    }
+    return spans, options
+
+
 def namespace_extmarks(nvim, buffer, namespace_name, namespaces):
     namespace = namespaces.get(namespace_name)
     if namespace is None:
@@ -346,6 +549,8 @@ def snapshot(nvim, request_id, operation):
     row, column = nvim.current.window.cursor
     current_line = buffer_line(buffer, row - 1)
     mode = nvim.eval("mode(1)")
+    recording_register = nvim.call("reg_recording")
+    command_type = nvim.eval("getcmdtype()") if mode.startswith("c") else ""
     command_line = nvim.eval("getcmdline()") if mode.startswith("c") else ""
     command_position = max(0, int(nvim.eval("getcmdpos()")) - 1) if mode.startswith("c") else 0
     completion_candidates = []
@@ -368,6 +573,9 @@ def snapshot(nvim, request_id, operation):
     )
     if not selections and visual:
         selections = visual_selection(nvim, buffer, mode, row, column)
+    search_spans, editor_options = search_highlights(
+        nvim, buffer.number, command_type, command_line
+    )
     return {
         "type": "snapshot",
         "id": request_id,
@@ -378,6 +586,10 @@ def snapshot(nvim, request_id, operation):
         "row": row - 1,
         "column": byte_column_to_character(current_line, column),
         "mode": mode,
+        "recording_register": recording_register,
+        "editor_options": editor_options,
+        "search_highlights": search_spans,
+        "command_type": command_type,
         "command_line": command_line,
         "command_position": command_position,
         "completion_query": command_completion_query if command_completion_visible else "",
@@ -395,7 +607,7 @@ def snapshot(nvim, request_id, operation):
     }
 
 
-def select_document(nvim, document_id, text, filename):
+def ensure_document_buffer(nvim, document_id, text, filename):
     global pending_reuse_buffer
 
     buffer = document_buffers.get(document_id)
@@ -420,12 +632,35 @@ def select_document(nvim, document_id, text, filename):
         buffer_documents[buffer] = document_id
         visible_highlight_ranges[buffer] = (0, HIGHLIGHT_CHUNK_LINES)
         set_buffer_text(target, text)
-    nvim.api.set_current_buf(buffer)
     set_buffer_filetype(nvim, buffer, filename, buffer_text(nvim.buffers[buffer]))
     if pending_reuse_buffer is not None:
         if pending_reuse_buffer != buffer and nvim.api.buf_is_valid(pending_reuse_buffer):
             nvim.api.buf_delete(pending_reuse_buffer, {"force": True})
         pending_reuse_buffer = None
+    return buffer
+
+
+def select_document(nvim, document_id, text, filename):
+    buffer = ensure_document_buffer(nvim, document_id, text, filename)
+    nvim.api.set_current_buf(buffer)
+
+
+def register_documents(nvim, documents, active_document_id):
+    global pending_reuse_buffer
+
+    active_document_id = int(active_document_id)
+    for document in documents:
+        ensure_document_buffer(
+            nvim,
+            int(document["document_id"]),
+            document.get("text", ""),
+            document.get("filename", ""),
+        )
+
+    active_buffer = document_buffers.get(active_document_id)
+    if active_buffer is None:
+        raise ValueError(f"Unknown active Notes document: {active_document_id}")
+    nvim.api.set_current_buf(active_buffer)
 
 
 def close_document(nvim, document_id):
@@ -436,6 +671,7 @@ def close_document(nvim, document_id):
         return
     buffer_documents.pop(buffer, None)
     highlight_cache.pop(buffer, None)
+    search_highlight_cache.pop(buffer, None)
     visible_highlight_ranges.pop(buffer, None)
     if buffer == nvim.current.buffer.number:
         pending_reuse_buffer = buffer
@@ -477,6 +713,12 @@ def run_snapshot_worker(nvim):
                     int(request["document_id"]),
                     request.get("text", ""),
                     request.get("filename", ""),
+                )
+            elif operation == "register_documents":
+                register_documents(
+                    nvim,
+                    request.get("documents", []),
+                    request["active_document_id"],
                 )
             elif operation == "set_filetype":
                 document_id = int(request["document_id"])
@@ -561,6 +803,9 @@ try:
         raise RuntimeError("Neovim RPC socket did not start.")
     nvim = pynvim.attach("socket", path=socket_path)
     nvim.options["swapfile"] = False
+    nvim.options["hlsearch"] = False
+    nvim.current.window.options["number"] = True
+    nvim.current.window.options["relativenumber"] = True
     input_nvim.input("i")
     snapshot_thread = threading.Thread(
         target=run_snapshot_worker, args=(nvim,), daemon=True
@@ -588,9 +833,9 @@ try:
             if operation == "input":
                 input_nvim.input(request["keys"])
             elif operation not in {
-                "select_document", "set_filetype", "close_document",
-                "set_cursor", "set_highlight_range", "sync", "command_state",
-                "add_command_history",
+                "select_document", "register_documents", "set_filetype",
+                "close_document", "set_cursor", "set_highlight_range", "sync",
+                "command_state", "add_command_history",
             }:
                 raise ValueError(f"Unknown operation: {operation}")
             snapshot_tasks.put((operation, request))

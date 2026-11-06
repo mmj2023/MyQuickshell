@@ -29,6 +29,7 @@ BasePill {
   property string nvimDisplayText: ""
   property string nvimDisplaySourceText: ""
   property string nvimDisplayHighlightKey: ""
+  property string nvimDisplaySearchHighlightKey: ""
   property var nvimLineStarts: [0]
   property string lastNvimHighlightRange: ""
   property bool preservingNvimViewport: false
@@ -39,12 +40,12 @@ BasePill {
     Qt.callLater(function() { noteEditor.forceActiveFocus() })
   }
 
-  function executeNvimCommand(commandText) {
+  function executeNvimCommand(commandText, commandType) {
     const command = commandText.trim()
     root.nvimCommandSubmitting = false
     root.nvimCommandMode = false
 
-    if (!command) {
+    if (commandType !== ":" || !command) {
       NotesService.sendNvimInput("<CR>")
     } else {
       const normalized = command.toLowerCase()
@@ -234,8 +235,60 @@ BasePill {
 
   function nvimModeUsesBlockCursor() {
     const mode = NotesService.nvimMode
-    return mode.startsWith("n") || mode.startsWith("v") || mode.startsWith("V")
+    return root.nvimCommandMode || mode.startsWith("n")
+      || mode.startsWith("v") || mode.startsWith("V")
       || mode.startsWith("\u0016") || mode.startsWith("s") || mode.startsWith("S")
+  }
+
+  function nvimLineNumbersEnabled() {
+    const options = NotesService.nvimEditorOptions
+    return NotesService.nvimAvailable
+      ? Boolean(options.number || options.relativenumber)
+      : SettingsData.notesShowLineNumbers
+  }
+
+  function toggleLineNumbers() {
+    if (!NotesService.nvimAvailable) {
+      SettingsData.set("notesShowLineNumbers", !SettingsData.notesShowLineNumbers)
+      return
+    }
+
+    const enabled = nvimLineNumbersEnabled()
+    NotesService.sendNvimInput("<Esc>:set "
+      + (enabled ? "nonumber norelativenumber" : "number relativenumber")
+      + "<CR>")
+  }
+
+  function nvimWrapEnabled() {
+    return !NotesService.nvimAvailable
+      || NotesService.nvimEditorOptions.wrap !== false
+  }
+
+  function nvimEditorContentWidth() {
+    if (root.nvimWrapEnabled())
+      return editorFlickable.width
+    const lines = NotesService.currentText.split("\n")
+    const widestLine = lines.reduce((widest, line) =>
+      Math.max(widest, Array.from(line).length), 0)
+    return Math.max(editorFlickable.width,
+      widestLine * root.nvimCharacterWidth("M") + lineNumbers.width
+        + editorRow.spacing + noteEditor.leftPadding + noteEditor.rightPadding)
+  }
+
+  function nvimLineNumberText() {
+    const count = Math.max(1, NotesService.currentText.split("\n").length)
+    if (!NotesService.nvimAvailable)
+      return Array.from({ length: count }, (_, index) => String(index + 1)).join("\n")
+
+    const options = NotesService.nvimEditorOptions
+    const numbers = Boolean(options.number)
+    const relative = Boolean(options.relativenumber)
+    const cursorRow = NotesService.nvimRow
+    return Array.from({ length: count }, (_, index) => {
+      if (relative && (index !== cursorRow || !numbers))
+        return String(Math.abs(index - cursorRow))
+      return numbers ? String(index + 1) : ""
+    }).join("\n")
   }
 
   function nvimModeLabel(mode) {
@@ -348,9 +401,11 @@ BasePill {
       .replace(/>/g, "&gt;")
   }
 
-  function buildNvimRichText(text, highlights) {
+  function buildNvimRichText(text, highlights, searchHighlights) {
     const lines = String(text).split("\n")
     const groups = lines.map(line =>
+      Array.from(line, () => ""))
+    const matches = lines.map(line =>
       Array.from(line, () => ""))
     for (const highlight of highlights || []) {
       const row = Math.max(0, Math.min(Number(highlight.row) || 0, lines.length - 1))
@@ -360,8 +415,17 @@ BasePill {
       for (let column = start; column < end; column++)
         groups[row][column] = String(highlight.group || "")
     }
+    for (const highlight of searchHighlights || []) {
+      const row = Math.max(0, Math.min(Number(highlight.row) || 0, lines.length - 1))
+      const start = Math.max(0, Number(highlight.start_column) || 0)
+      const end = Math.min(matches[row].length,
+        Math.max(start, Number(highlight.end_column) || 0))
+      for (let column = start; column < end; column++)
+        matches[row][column] = String(highlight.group || "Search")
+    }
 
-    let markup = "<pre style=\"margin:0; white-space:pre-wrap; font-family:'"
+    let markup = "<pre style=\"margin:0; white-space:"
+      + (root.nvimWrapEnabled() ? "pre-wrap" : "pre") + "; font-family:'"
       + root.escapeHtml(noteEditor.font.family) + "'; font-size:"
       + noteEditor.font.pixelSize + "px;\">"
     for (let row = 0; row < lines.length; row++) {
@@ -369,12 +433,18 @@ BasePill {
       let column = 0
       while (column < characters.length) {
         const role = root.nvimHighlightRole(groups[row][column])
+        const searchGroup = matches[row][column]
         let end = column + 1
         while (end < characters.length
-            && root.nvimHighlightRole(groups[row][end]) === role)
+            && root.nvimHighlightRole(groups[row][end]) === role
+            && matches[row][end] === searchGroup)
           end++
         const color = root.nvimHighlightColor(role).toString()
-        markup += "<span style=\"color:" + color + "\">"
+        const searchColor = searchGroup === "IncSearch"
+          ? Theme.withAlpha(Theme.primary, 0.42).toString()
+          : Theme.withAlpha(Theme.primary, 0.28).toString()
+        markup += "<span style=\"color:" + color
+          + (searchGroup ? "; background-color:" + searchColor : "") + "\">"
           + root.escapeHtml(characters.slice(column, end).join(""))
           + "</span>"
         column = end
@@ -557,6 +627,12 @@ BasePill {
     font: noteEditor.font
   }
 
+  TextMetrics {
+    id: spaceMetrics
+    font: noteEditor.font
+    text: " "
+  }
+
   Timer {
     id: nvimHighlightRangeTimer
     interval: 50
@@ -567,8 +643,8 @@ BasePill {
   Connections {
     target: NotesService
     function onNvimSaveRequested() { root.saveNoteFromSnapshot() }
-    function onNvimCommandSubmitted(commandLine) {
-      root.executeNvimCommand(commandLine)
+    function onNvimCommandSubmitted(commandLine, commandType) {
+      root.executeNvimCommand(commandLine, commandType)
     }
     function onNvimAvailableChanged() {
       if (!NotesService.nvimAvailable) {
@@ -586,7 +662,10 @@ BasePill {
         root.nvimCommandSubmitting = false
     }
     function onNvimStateChanged(text, row, column, mode, selections, cursors, highlights) {
-      if (!String(mode).startsWith("c") && root.nvimCommandMode
+      if (String(mode).startsWith("c") && !root.nvimCommandMode) {
+        root.nvimCommandMode = true
+        Qt.callLater(function() { nvimCommandInput.forceActiveFocus() })
+      } else if (!String(mode).startsWith("c") && root.nvimCommandMode
           && !root.nvimCommandSubmitting) {
         root.nvimCommandMode = false
         Qt.callLater(function() { noteEditor.forceActiveFocus() })
@@ -597,6 +676,8 @@ BasePill {
       const sourceText = String(text)
       const nextHighlights = highlights || []
       const highlightKey = JSON.stringify(nextHighlights)
+      const nextSearchHighlights = NotesService.nvimSearchHighlights || []
+      const searchHighlightKey = JSON.stringify(nextSearchHighlights)
       const textChanged = root.nvimDisplaySourceText !== sourceText
       const preserveViewport = !textChanged
         && NotesService.nvimSnapshotOperation === "set_highlight_range"
@@ -606,10 +687,13 @@ BasePill {
         root.nvimDisplaySourceText = sourceText
         root.updateNvimLineStarts(sourceText)
       }
-      if (textChanged || root.nvimDisplayHighlightKey !== highlightKey) {
+      if (textChanged || root.nvimDisplayHighlightKey !== highlightKey
+          || root.nvimDisplaySearchHighlightKey !== searchHighlightKey) {
         root.nvimHighlights = nextHighlights
         root.nvimDisplayHighlightKey = highlightKey
-        root.nvimDisplayText = root.buildNvimRichText(sourceText, nextHighlights)
+        root.nvimDisplaySearchHighlightKey = searchHighlightKey
+        root.nvimDisplayText = root.buildNvimRichText(
+          sourceText, nextHighlights, nextSearchHighlights)
       }
       Qt.callLater(function() {
         noteEditor.cursorPosition = root.editorTextPosition(row, column)
@@ -1002,14 +1086,14 @@ BasePill {
             height: 36
             anchors.verticalCenter: parent.verticalCenter
             radius: Theme.hoverRadius
-            color: SettingsData.notesShowLineNumbers
+            color: root.nvimLineNumbersEnabled()
               ? Theme.withAlpha(Theme.primary, 0.16)
               : (lineNumberMouse.containsMouse ? Theme.withAlpha(Theme.primary, 0.1) : "transparent")
 
             Text {
               id: optionsText
               anchors.centerIn: parent
-              text: SettingsData.notesShowLineNumbers
+              text: root.nvimLineNumbersEnabled()
                 ? qsTr("✓  Line numbers")
                 : qsTr("Line numbers")
               color: Theme.widgetTextColor
@@ -1022,7 +1106,7 @@ BasePill {
               anchors.fill: parent
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
-              onClicked: SettingsData.set("notesShowLineNumbers", !SettingsData.notesShowLineNumbers)
+              onClicked: root.toggleLineNumbers()
             }
           }
 
@@ -1074,9 +1158,10 @@ BasePill {
             anchors.margins: 8
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            contentWidth: width
+            contentWidth: editorRow.width
             contentHeight: editorRow.height
-            flickableDirection: Flickable.VerticalFlick
+            flickableDirection: root.nvimWrapEnabled()
+              ? Flickable.VerticalFlick : Flickable.HorizontalAndVerticalFlick
             onContentYChanged: nvimHighlightRangeTimer.restart()
             onContentHeightChanged: nvimHighlightRangeTimer.restart()
             onHeightChanged: nvimHighlightRangeTimer.restart()
@@ -1089,6 +1174,14 @@ BasePill {
               const cursor = noteEditor.cursorRectangle
               const visibleTop = contentY
               const visibleBottom = contentY + height
+              const visibleLeft = contentX + lineNumbers.width + editorRow.spacing
+              const visibleRight = contentX + width
+              const cursorLeft = cursor.x + lineNumbers.width + editorRow.spacing
+              if (cursorLeft < visibleLeft)
+                contentX = Math.max(0, cursorLeft)
+              else if (cursorLeft + cursor.width > visibleRight)
+                contentX = Math.max(0, Math.min(contentWidth - width,
+                  cursorLeft + cursor.width - width))
               if (cursor.y < visibleTop)
                 contentY = Math.max(0, cursor.y)
               else if (cursor.y + cursor.height > visibleBottom)
@@ -1097,20 +1190,20 @@ BasePill {
 
             Row {
               id: editorRow
-              width: editorFlickable.width
+              width: root.nvimEditorContentWidth()
               height: Math.max(editorFlickable.height, noteEditor.contentHeight + 24)
               spacing: 8
 
               Text {
                 id: lineNumbers
-                visible: SettingsData.notesShowLineNumbers
-                width: visible ? 32 : 0
+                visible: root.nvimLineNumbersEnabled()
+                width: visible
+                  ? Math.max(32, String(NotesService.currentText.split("\n").length).length
+                    * noteEditor.font.pixelSize * 0.68 + 8)
+                  : 0
                 height: parent.height
                 topPadding: 8
-                text: {
-                  const count = Math.max(1, NotesService.currentText.split("\n").length)
-                  return Array.from({ length: count }, (_, index) => String(index + 1)).join("\n")
-                }
+                text: root.nvimLineNumberText()
                 color: Theme.widgetInactiveIconColor
                 font.family: noteEditor.font.family
                 font.pixelSize: noteEditor.font.pixelSize
@@ -1128,7 +1221,8 @@ BasePill {
                   ? root.nvimDisplayText : NotesService.currentText
                 enabled: NotesService.ready && !NotesService.nvimStarting
                 readOnly: NotesService.nvimAvailable
-                cursorVisible: NotesService.nvimAvailable && activeFocus
+                cursorVisible: NotesService.nvimAvailable
+                  && (activeFocus || root.nvimCommandMode)
                 cursorDelegate: Rectangle {
                   width: root.nvimModeUsesBlockCursor()
                     ? Math.max(2, noteEditor.font.pixelSize * 0.6)
@@ -1145,7 +1239,9 @@ BasePill {
                 placeholderTextColor: Theme.widgetInactiveIconColor
                 font.family: Theme.monoFontFamily
                 font.pixelSize: Theme.fontSizeMedium
-                wrapMode: TextEdit.Wrap
+                tabStopDistance: spaceMetrics.advanceWidth
+                  * (Number(NotesService.nvimEditorOptions.tabstop) || 8)
+                wrapMode: root.nvimWrapEnabled() ? TextEdit.Wrap : TextEdit.NoWrap
                 selectByMouse: true
                 selectByKeyboard: true
                 textFormat: NotesService.nvimAvailable
@@ -1156,6 +1252,19 @@ BasePill {
                 bottomPadding: 8
                 background: Item {
                   clip: true
+                  Rectangle {
+                    readonly property int cursorPosition:
+                      root.editorTextPosition(NotesService.nvimRow, 0)
+                    readonly property rect cursorRect:
+                      noteEditor.positionToRectangle(cursorPosition)
+                    visible: NotesService.nvimAvailable
+                      && Boolean(NotesService.nvimEditorOptions.cursorline)
+                    x: 0
+                    y: cursorRect.y
+                    width: noteEditor.width
+                    height: cursorRect.height
+                    color: Theme.withAlpha(Theme.primary, 0.08)
+                  }
                   Repeater {
                     model: root.nvimSelectionRects
                     delegate: Rectangle {
@@ -1175,7 +1284,8 @@ BasePill {
                       root.editorTextPosition(modelData.row, modelData.column)
                     readonly property rect cursorRect:
                       noteEditor.positionToRectangle(textPosition)
-                    visible: NotesService.nvimAvailable && noteEditor.activeFocus
+                    visible: NotesService.nvimAvailable
+                      && (noteEditor.activeFocus || root.nvimCommandMode)
                     x: cursorRect.x
                     y: cursorRect.y
                     width: root.nvimModeUsesBlockCursor()
@@ -1238,7 +1348,7 @@ BasePill {
 
               Text {
                 height: parent.height
-                text: ":"
+                text: NotesService.nvimCommandType || ":"
                 color: Theme.primary
                 font.family: Theme.monoFontFamily
                 font.pixelSize: Theme.fontSizeMedium
@@ -1493,7 +1603,22 @@ BasePill {
           }
 
           Text {
-            width: parent.width - noteStats.width - nvimModeStatus.width - parent.spacing * 2
+            id: nvimRecordingStatus
+            visible: NotesService.nvimAvailable
+              && NotesService.nvimRecordingRegister !== ""
+            width: visible ? implicitWidth : 0
+            height: parent.height
+            text: qsTr("Recording @%1").arg(NotesService.nvimRecordingRegister)
+            color: Theme.error
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+            verticalAlignment: Text.AlignVCenter
+          }
+
+          Text {
+            width: parent.width - noteStats.width - nvimModeStatus.width
+              - nvimRecordingStatus.width
+              - parent.spacing * 3
             height: parent.height
             text: NotesService.error !== "" ? NotesService.error
               : (NotesService.nvimError !== "" && NotesService.nvimAvailable ? NotesService.nvimError

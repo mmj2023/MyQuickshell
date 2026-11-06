@@ -25,7 +25,8 @@ reimplementing Vim motions in QML. The QML command prompt is a visible input
 surface because headless Neovim does not render its own command line. The
 prompt forwards command-line keystrokes to Neovim, preserving its built-in
 completion, editing keys, and command history; completion candidates appear in
-a themed menu in the Notes overlay. The
+a themed menu in the Notes overlay. Vim macros are handled by Neovim; while a
+macro is recording, the status bar displays its register. The
 Notes-specific `:w` and `:q` actions are handled through NotesService to save
 or close the current note buffer; `:q` does not close the overlay. Character,
 line, and block Visual selections are rendered in the QML editor, along with
@@ -34,7 +35,14 @@ add cursors and `Ctrl-L` to clear them. The editor uses Neovim's detected
 filetype and syntax groups to color text with the current shell theme; unnamed
 notes default to Markdown highlighting. Notes up to 2,000 lines are highlighted
 as a whole; larger documents are highlighted in 200-line chunks around the
-visible editor area, with a bounded cache for recently viewed chunks.
+visible editor area, with a bounded cache for recently viewed chunks. Search and
+substitution matches use Neovim's regex and `hlsearch`, `incsearch`, and
+`inccommand` options; the editor also reflects Neovim's `number`,
+`relativenumber`, `wrap`, `cursorline`, and `tabstop` settings. `:set` and Lua
+option changes are reflected in the Notes view. Search highlights are transient
+by default; enable persistent matches with `:set hlsearch` or
+`:lua vim.opt.hlsearch = true`. Line numbers default to both absolute and
+relative (`:set nu relativenumber`).
 
 > Requires a compositor with the wlr-layer-shell protocol (Hyprland, river,
 > sway, and friends all support it). Workspace state is read via `hyprctl`; the

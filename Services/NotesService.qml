@@ -27,6 +27,11 @@ Singleton {
   property bool nvimStarting: false
   property string nvimError: ""
   property string nvimMode: ""
+  property string nvimRecordingRegister: ""
+  property string nvimCommandType: ""
+  property int nvimRow: 0
+  property var nvimEditorOptions: ({})
+  property var nvimSearchHighlights: []
   property string nvimCommandLine: ""
   property string nvimSnapshotOperation: ""
   property int nvimCommandPosition: 0
@@ -57,7 +62,7 @@ Singleton {
   signal toggleRequested(var monitor)
   signal nvimStateChanged(string text, int row, int column, string mode,
     var selections, var cursors, var highlights)
-  signal nvimCommandSubmitted(string commandLine)
+  signal nvimCommandSubmitted(string commandLine, string commandType)
   signal nvimSaveRequested()
 
   onDocumentsChanged: {
@@ -106,6 +111,24 @@ Singleton {
     }
   }
 
+  function registerNvimDocuments() {
+    if (!nvimAvailable || !documents.length || !currentDocument)
+      return
+    const requestId = sendNvimRequest("register_documents", {
+      active_document_id: currentDocument.id,
+      documents: documents.map(doc => ({
+        document_id: doc.id,
+        text: doc.text,
+        filename: doc.path || doc.title || ""
+      }))
+    })
+    if (requestId) {
+      _nvimRequestedDocumentId = currentDocument.id
+      _nvimDocumentFilename = currentDocument.path || currentDocument.title || ""
+      _nvimSelectionRequestId = requestId
+    }
+  }
+
   function syncNvimDocumentMetadata() {
     const doc = currentDocument
     if (!nvimAvailable || !doc
@@ -139,7 +162,7 @@ Singleton {
       _nvimRequestedDocumentId = -1
       _nvimActiveDocumentId = -1
       _nvimDocumentFilename = ""
-      syncNvimDocument()
+      registerNvimDocuments()
       return
     }
     if (message.type === "unavailable") {
@@ -180,6 +203,11 @@ Singleton {
       currentIndex = documentIndex
 
     nvimMode = String(message.mode || "")
+    nvimRecordingRegister = String(message.recording_register || "")
+    nvimCommandType = String(message.command_type || "")
+    nvimRow = Number(message.row) || 0
+    nvimEditorOptions = message.editor_options || ({})
+    nvimSearchHighlights = message.search_highlights || []
     nvimSnapshotOperation = String(message.operation || "")
     nvimCommandLine = String(message.command_line || "")
     nvimCommandPosition = Number(message.command_position) || 0
@@ -197,7 +225,7 @@ Singleton {
       updateDocumentText(documentId, message.text)
     if (Number(message.id) === _nvimCommandSubmitRequestId) {
       _nvimCommandSubmitRequestId = 0
-      nvimCommandSubmitted(nvimCommandLine)
+      nvimCommandSubmitted(nvimCommandLine, nvimCommandType)
     }
     if (Number(message.id) === _saveAfterNvimRequestId) {
       _saveAfterNvimRequestId = 0
@@ -438,6 +466,8 @@ Singleton {
 
     if (restored.length === 0)
       loadDefaultNote()
+    else if (nvimAvailable)
+      registerNvimDocuments()
     else
       syncNvimDocument()
   }
