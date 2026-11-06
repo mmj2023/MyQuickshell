@@ -30,6 +30,10 @@ Singleton {
   property string nvimCommandLine: ""
   property string nvimSnapshotOperation: ""
   property int nvimCommandPosition: 0
+  property string nvimCompletionQuery: ""
+  property var nvimCompletionCandidates: []
+  property int nvimCompletionIndex: -1
+  property bool nvimCompletionVisible: false
   property int nvimHighlightLineLimit: 2000
   property int nvimHighlightChunkLines: 200
   property int _nvimRequestId: 0
@@ -179,6 +183,10 @@ Singleton {
     nvimSnapshotOperation = String(message.operation || "")
     nvimCommandLine = String(message.command_line || "")
     nvimCommandPosition = Number(message.command_position) || 0
+    nvimCompletionQuery = String(message.completion_query || "")
+    nvimCompletionCandidates = message.completion_candidates || []
+    nvimCompletionIndex = Number(message.completion_index)
+    nvimCompletionVisible = Boolean(message.completion_visible)
     nvimHighlights = message.highlights || []
     nvimError = ""
     nvimStateChanged(message.text, Number(message.row) || 0,
@@ -206,8 +214,11 @@ Singleton {
     }
   }
 
-  function sendNvimInput(keys) {
-    return sendNvimRequest("input", { keys: keys })
+  function sendNvimInput(keys, completionQuery) {
+    const request = { keys: keys }
+    if (completionQuery !== undefined)
+      request.completion_query = completionQuery
+    return sendNvimRequest("input", request)
   }
 
   function submitNvimCommandLine() {

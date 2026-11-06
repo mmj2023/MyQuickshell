@@ -87,8 +87,16 @@ BasePill {
       return
     }
     const keys = root.keyForNvim(event)
-    if (keys)
-      NotesService.sendNvimInput(keys)
+    if (keys) {
+      if (keys === "<Tab>" || keys === "<S-Tab>") {
+        const query = NotesService.nvimCompletionVisible
+          ? NotesService.nvimCompletionQuery
+          : NotesService.nvimCommandLine.slice(0, NotesService.nvimCommandPosition)
+        NotesService.sendNvimInput(keys, query)
+      } else {
+        NotesService.sendNvimInput(keys)
+      }
+    }
     event.accepted = true
   }
 
@@ -1254,6 +1262,60 @@ BasePill {
                 clip: true
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: event => root.handleNvimCommandKey(event)
+              }
+            }
+          }
+
+          Rectangle {
+            id: nvimCompletionMenu
+            visible: NotesService.nvimAvailable && root.nvimCommandMode
+              && !root.markdownPreview && NotesService.nvimCompletionVisible
+              && NotesService.nvimCompletionCandidates.length > 0
+            x: nvimCommandBar.x
+            width: Math.min(nvimCommandBar.width, 360)
+            height: Math.min(NotesService.nvimCompletionCandidates.length * 26, 182)
+            anchors.bottom: nvimCommandBar.top
+            anchors.bottomMargin: Theme.spaceXS
+            radius: Theme.cornerRadius
+            color: Theme.surfaceContainerHigh
+            border.width: 1
+            border.color: Theme.withAlpha(Theme.primary, 0.35)
+            clip: true
+            z: 3
+
+            ListView {
+              id: nvimCompletionList
+              anchors.fill: parent
+              anchors.margins: Theme.spaceXS
+              model: NotesService.nvimCompletionCandidates
+              currentIndex: NotesService.nvimCompletionIndex
+              highlightFollowsCurrentItem: false
+              clip: true
+              onCurrentIndexChanged: {
+                if (currentIndex >= 0)
+                  positionViewAtIndex(currentIndex, ListView.Contain)
+              }
+
+              delegate: Rectangle {
+                required property string modelData
+                required property int index
+                width: nvimCompletionList.width
+                height: 26
+                radius: Theme.hoverRadius
+                color: index === nvimCompletionList.currentIndex
+                  ? Theme.withAlpha(Theme.primary, 0.2) : "transparent"
+
+                Text {
+                  anchors.fill: parent
+                  anchors.leftMargin: Theme.spaceS
+                  anchors.rightMargin: Theme.spaceS
+                  text: modelData
+                  color: Theme.surfaceText
+                  font.family: Theme.monoFontFamily
+                  font.pixelSize: Theme.fontSizeSmall
+                  verticalAlignment: Text.AlignVCenter
+                  elide: Text.ElideRight
+                }
               }
             }
           }

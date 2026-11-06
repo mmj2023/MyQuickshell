@@ -25,6 +25,8 @@ pending_reuse_buffer = None
 last_snapshot_buffer = None
 highlight_cache = {}
 visible_highlight_ranges = {}
+command_completion_query = ""
+command_completion_visible = False
 
 FULL_HIGHLIGHT_LINE_LIMIT = 2000
 HIGHLIGHT_CHUNK_LINES = 200
@@ -332,7 +334,7 @@ def multicursor_positions(nvim, buffer, mode, row, byte_column, namespaces):
 
 
 def snapshot(nvim, request_id, operation):
-    global last_snapshot_buffer
+    global command_completion_query, command_completion_visible, last_snapshot_buffer
 
     buffer = nvim.current.buffer
     buffer_number = buffer.number
@@ -346,6 +348,19 @@ def snapshot(nvim, request_id, operation):
     mode = nvim.eval("mode(1)")
     command_line = nvim.eval("getcmdline()") if mode.startswith("c") else ""
     command_position = max(0, int(nvim.eval("getcmdpos()")) - 1) if mode.startswith("c") else 0
+    completion_candidates = []
+    completion_index = -1
+    if mode.startswith("c") and command_completion_visible:
+        completion_candidates = nvim.call(
+            "getcompletion", command_completion_query, "cmdline"
+        )
+        try:
+            completion_index = completion_candidates.index(command_line)
+        except ValueError:
+            pass
+    elif not mode.startswith("c"):
+        command_completion_query = ""
+        command_completion_visible = False
     visual = mode.startswith(("v", "V")) or mode == "\x16"
     namespaces = nvim.api.get_namespaces()
     selections = multicursor_selections(
@@ -365,6 +380,10 @@ def snapshot(nvim, request_id, operation):
         "mode": mode,
         "command_line": command_line,
         "command_position": command_position,
+        "completion_query": command_completion_query if command_completion_visible else "",
+        "completion_visible": bool(completion_candidates),
+        "completion_candidates": completion_candidates,
+        "completion_index": completion_index,
         "selections": selections,
         "highlights": syntax_highlights(
             nvim, buffer.number,
@@ -433,6 +452,7 @@ def install_term_handler():
 
 
 def run_snapshot_worker(nvim):
+    global command_completion_query, command_completion_visible
     while True:
         task = snapshot_tasks.get()
         if task is None:
@@ -441,6 +461,16 @@ def run_snapshot_worker(nvim):
         operation, request = task
         request_id = request.get("id")
         try:
+            if operation == "input":
+                keys = request.get("keys", "")
+                if keys in {"<Tab>", "<S-Tab>"} and request.get("completion_query") is not None:
+                    if not command_completion_visible:
+                        command_completion_query = str(request["completion_query"])
+                    command_completion_visible = True
+                elif not keys.startswith(("<Up>", "<Down>")):
+                    command_completion_query = ""
+                    command_completion_visible = False
+
             if operation == "select_document":
                 select_document(
                     nvim,

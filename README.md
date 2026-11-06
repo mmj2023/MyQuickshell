@@ -24,7 +24,8 @@ keys and completed Ex commands are passed to Neovim for processing rather than
 reimplementing Vim motions in QML. The QML command prompt is a visible input
 surface because headless Neovim does not render its own command line. The
 prompt forwards command-line keystrokes to Neovim, preserving its built-in
-completion, editing keys, and command history. The
+completion, editing keys, and command history; completion candidates appear in
+a themed menu in the Notes overlay. The
 Notes-specific `:w` and `:q` actions are handled through NotesService to save
 or close the current note buffer; `:q` does not close the overlay. Character,
 line, and block Visual selections are rendered in the QML editor, along with
