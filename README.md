@@ -126,7 +126,7 @@ Copyright (C) 2026 mmj2023
 
 ## Showcase
 
-![MyQuickshell desktop bar showcase](assets/myBar_showcase.png)
+![MyQuickshell desktop bar showcase](assets/Mybar_showcase.png)
 
 ## Structure
 
