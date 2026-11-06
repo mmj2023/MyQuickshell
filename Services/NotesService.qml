@@ -27,27 +27,41 @@ Singleton {
   property bool nvimStarting: false
   property string nvimError: ""
   property string nvimMode: ""
+  property string nvimCommandLine: ""
+  property string nvimSnapshotOperation: ""
+  property int nvimCommandPosition: 0
+  property int nvimHighlightLineLimit: 2000
+  property int nvimHighlightChunkLines: 200
   property int _nvimRequestId: 0
   property int _nvimSelectionRequestId: 0
   property int _saveAfterNvimRequestId: 0
-  property int _nvimDocumentId: -1
+  property string _saveAfterNvimUrl: ""
+  property bool _saveAfterNvimAutoSave: false
+  property int _nvimCommandSubmitRequestId: 0
+  property int _nvimRequestedDocumentId: -1
+  property int _nvimActiveDocumentId: -1
+  property string _nvimDocumentFilename: ""
+  property string nvimText: ""
+  property var nvimHighlights: []
   readonly property var currentDocument: documents.length > currentIndex ? documents[currentIndex] : null
-  readonly property string currentText: currentDocument ? currentDocument.text : ""
+  readonly property string currentText: nvimAvailable
+    ? nvimText : (currentDocument ? currentDocument.text : "")
   readonly property bool currentDirty: currentDocument ? currentDocument.text !== currentDocument.savedText : false
   readonly property bool saving: _pendingWrites > 0
 
   signal fileChooserFinished(var requester, string operation, int exitCode, string output, string errorOutput)
   signal toggleRequested(var monitor)
-  signal nvimStateChanged(string text, int row, int column, string mode)
+  signal nvimStateChanged(string text, int row, int column, string mode,
+    var selections, var cursors, var highlights)
+  signal nvimCommandSubmitted(string commandLine)
   signal nvimSaveRequested()
 
   onDocumentsChanged: {
     scheduleSessionSave()
-    syncNvimDocument()
+    syncNvimDocumentMetadata()
   }
   onCurrentIndexChanged: {
     scheduleSessionSave()
-    syncNvimDocument()
   }
 
   function startNvimBackend() {
@@ -66,13 +80,41 @@ Singleton {
     return request.id
   }
 
-  function syncNvimDocument() {
-    const doc = currentDocument
-    if (!nvimAvailable || !doc || doc.id === _nvimDocumentId)
+  function syncNvimDocument(document) {
+    const doc = document || currentDocument
+    if (!nvimAvailable || !doc)
       return
-    _nvimDocumentId = doc.id
-    _nvimSelectionRequestId = sendNvimRequest(
-      "select_document", { document_id: doc.id, text: doc.text })
+    const filename = doc.path || doc.title || ""
+    if (doc.id !== _nvimRequestedDocumentId) {
+      const requestId = sendNvimRequest(
+        "select_document",
+        { document_id: doc.id, text: doc.text, filename: filename })
+      if (requestId) {
+        _nvimRequestedDocumentId = doc.id
+        _nvimDocumentFilename = filename
+        _nvimSelectionRequestId = requestId
+      }
+    } else if (filename !== _nvimDocumentFilename) {
+      _nvimDocumentFilename = filename
+      sendNvimRequest("set_filetype", {
+        document_id: doc.id, filename: filename, text: doc.text
+      })
+    }
+  }
+
+  function syncNvimDocumentMetadata() {
+    const doc = currentDocument
+    if (!nvimAvailable || !doc
+        || (doc.id !== _nvimActiveDocumentId
+          && doc.id !== _nvimRequestedDocumentId))
+      return
+    const filename = doc.path || doc.title || ""
+    if (filename === _nvimDocumentFilename)
+      return
+    _nvimDocumentFilename = filename
+    sendNvimRequest("set_filetype", {
+      document_id: doc.id, filename: filename, text: doc.text
+    })
   }
 
   function handleNvimBridgeMessage(line) {
@@ -88,7 +130,11 @@ Singleton {
       nvimStarting = false
       nvimAvailable = true
       nvimError = ""
-      _nvimDocumentId = -1
+      nvimHighlightLineLimit = Number(message.highlight_line_limit) || nvimHighlightLineLimit
+      nvimHighlightChunkLines = Number(message.highlight_chunk_lines) || nvimHighlightChunkLines
+      _nvimRequestedDocumentId = -1
+      _nvimActiveDocumentId = -1
+      _nvimDocumentFilename = ""
       syncNvimDocument()
       return
     }
@@ -100,6 +146,13 @@ Singleton {
       return
     }
     if (message.type === "error") {
+      if (Number(message.id) === _nvimCommandSubmitRequestId)
+        _nvimCommandSubmitRequestId = 0
+      if (Number(message.id) === _saveAfterNvimRequestId) {
+        _saveAfterNvimRequestId = 0
+        _saveAfterNvimUrl = ""
+        _saveAfterNvimAutoSave = false
+      }
       nvimError = message.message || qsTr("Neovim command failed.")
       console.warn("NotesService Neovim bridge error:", message.message || "Unknown error")
       return
@@ -107,30 +160,49 @@ Singleton {
     if (message.type !== "snapshot")
       return
 
-    if (Number(message.id) < _nvimSelectionRequestId)
+    if (Number(message.id) < _nvimSelectionRequestId
+        && Number(message.id) !== _saveAfterNvimRequestId)
       return
 
     const documentId = Number(message.document_id)
     const documentIndex = documents.findIndex(doc => doc.id === documentId)
     if (documentIndex < 0)
       return
-    if ((message.operation === "input" || message.operation === "command")
-        && message.buffer_changed) {
-      _nvimDocumentId = documentId
-      if (currentIndex !== documentIndex)
-        currentIndex = documentIndex
-    }
+    _nvimActiveDocumentId = documentId
+    const activeDocument = documents[documentIndex]
+    _nvimDocumentFilename = activeDocument.path || activeDocument.title || ""
+    nvimText = String(message.text || "")
+    if (currentIndex !== documentIndex)
+      currentIndex = documentIndex
 
     nvimMode = String(message.mode || "")
+    nvimSnapshotOperation = String(message.operation || "")
+    nvimCommandLine = String(message.command_line || "")
+    nvimCommandPosition = Number(message.command_position) || 0
+    nvimHighlights = message.highlights || []
     nvimError = ""
     nvimStateChanged(message.text, Number(message.row) || 0,
-      Number(message.column) || 0, nvimMode)
+      Number(message.column) || 0, nvimMode, message.selections || [],
+      message.cursors || [], nvimHighlights)
     const document = documents[documentIndex]
     if (message.text !== document.text)
-      editDocumentText(documentId, message.text)
+      updateDocumentText(documentId, message.text)
+    if (Number(message.id) === _nvimCommandSubmitRequestId) {
+      _nvimCommandSubmitRequestId = 0
+      nvimCommandSubmitted(nvimCommandLine)
+    }
     if (Number(message.id) === _saveAfterNvimRequestId) {
       _saveAfterNvimRequestId = 0
-      nvimSaveRequested()
+      const saveUrl = _saveAfterNvimUrl
+      const autoSave = _saveAfterNvimAutoSave
+      _saveAfterNvimUrl = ""
+      _saveAfterNvimAutoSave = false
+      if (autoSave)
+        startAutoSaveCurrentFromSnapshot()
+      else if (saveUrl)
+        saveDocument(documentId, saveUrl)
+      else
+        nvimSaveRequested()
     }
   }
 
@@ -138,23 +210,37 @@ Singleton {
     return sendNvimRequest("input", { keys: keys })
   }
 
-  function runNvimCommand(command) {
-    return sendNvimRequest("command", { command: command })
+  function submitNvimCommandLine() {
+    _nvimCommandSubmitRequestId = sendNvimRequest("command_state")
+    return _nvimCommandSubmitRequestId !== 0
+  }
+
+  function addNvimCommandHistory(command) {
+    sendNvimRequest("add_command_history", { command: command })
   }
 
   function setNvimCursor(row, column) {
     sendNvimRequest("set_cursor", { row: row, column: column })
   }
 
+  function setNvimHighlightRange(startRow, endRow) {
+    sendNvimRequest("set_highlight_range", {
+      document_id: currentDocument ? currentDocument.id : -1,
+      start_row: startRow, end_row: endRow
+    })
+  }
+
   function closeNvimDocument(documentId) {
     sendNvimRequest("close_document", { document_id: documentId })
   }
 
-  function saveAfterNvimSync() {
+  function saveAfterNvimSync(url, autoSave) {
     const requestId = sendNvimRequest("sync")
     if (!requestId)
       return false
     _saveAfterNvimRequestId = requestId
+    _saveAfterNvimUrl = url ? String(url) : ""
+    _saveAfterNvimAutoSave = Boolean(autoSave)
     return true
   }
 
@@ -283,6 +369,7 @@ Singleton {
     })
     documents = next
     currentIndex = next.length - 1
+    syncNvimDocument()
     error = ""
   }
 
@@ -340,12 +427,18 @@ Singleton {
 
     if (restored.length === 0)
       loadDefaultNote()
+    else
+      syncNvimDocument()
   }
 
   function selectDocument(index) {
     if (index < 0 || index >= documents.length)
       return
-    currentIndex = index
+    if (nvimAvailable) {
+      syncNvimDocument(documents[index])
+    } else {
+      currentIndex = index
+    }
     error = ""
   }
 
@@ -369,16 +462,19 @@ Singleton {
     } else if (currentIndex >= next.length) {
       currentIndex = next.length - 1
     }
+    syncNvimDocument()
     error = ""
   }
 
   function editCurrentText(value) {
+    if (nvimAvailable || nvimStarting)
+      return
     const doc = currentDocument
     if (doc)
-      editDocumentText(doc.id, value)
+      updateDocumentText(doc.id, value)
   }
 
-  function editDocumentText(documentId, value) {
+  function updateDocumentText(documentId, value) {
     const doc = documents.find(item => item.id === documentId)
     if (!ready || !doc || value === doc.text)
       return
@@ -403,11 +499,17 @@ Singleton {
   }
 
   function startAutoSaveCurrent() {
+    if (nvimAvailable && saveAfterNvimSync("", true))
+      return true
+    return startAutoSaveCurrentFromSnapshot()
+  }
+
+  function startAutoSaveCurrentFromSnapshot() {
     const doc = currentDocument
     if (!doc || !doc.text)
-      return
+      return false
     assignAutoSavePath(doc.id)
-    saveDocument(doc.id)
+    return saveDocument(doc.id)
   }
 
   function updateDocument(id, updates) {
@@ -456,7 +558,12 @@ Singleton {
   }
 
   function saveCurrent(url) {
-    return saveDocument(currentDocument ? currentDocument.id : -1, url)
+    const doc = currentDocument
+    if (!doc)
+      return false
+    if (nvimAvailable && saveAfterNvimSync(url, false))
+      return true
+    return saveDocument(doc.id, url)
   }
 
   function saveDocument(documentId, url) {
@@ -506,6 +613,7 @@ Singleton {
     })
     documents = next
     currentIndex = next.length - 1
+    syncNvimDocument()
     error = ""
   }
 

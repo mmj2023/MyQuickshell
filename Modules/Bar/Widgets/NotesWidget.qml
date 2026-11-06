@@ -21,6 +21,17 @@ BasePill {
   property string chooserInitialPath: ""
   property bool applyingNvimState: false
   property bool nvimCommandMode: false
+  property bool nvimCommandSubmitting: false
+  property var nvimCursors: []
+  property var nvimSelections: []
+  property var nvimSelectionRects: []
+  property var nvimHighlights: []
+  property string nvimDisplayText: ""
+  property string nvimDisplaySourceText: ""
+  property string nvimDisplayHighlightKey: ""
+  property var nvimLineStarts: [0]
+  property string lastNvimHighlightRange: ""
+  property bool preservingNvimViewport: false
 
   function closeNvimCommandMode() {
     NotesService.sendNvimInput("<Esc>")
@@ -28,31 +39,57 @@ BasePill {
     Qt.callLater(function() { noteEditor.forceActiveFocus() })
   }
 
-  function executeNvimCommand() {
-    const command = nvimCommandInput.text.trim()
+  function executeNvimCommand(commandText) {
+    const command = commandText.trim()
+    root.nvimCommandSubmitting = false
     root.nvimCommandMode = false
-    nvimCommandInput.clear()
 
     if (!command) {
-      noteEditor.forceActiveFocus()
-      return
-    }
-
-    const normalized = command.toLowerCase()
-    if (/^(w|write)(!?)$/.test(normalized)) {
-      if (!NotesService.saveAfterNvimSync())
-        root.saveNote()
-    } else if (/^(q|quit)(!?)$/.test(normalized)) {
-      NotesService.closeDocument(NotesService.currentIndex)
-    } else if (/^(qa|qall)(!?)$/.test(normalized)) {
-      root.setNotesVisible(false)
+      NotesService.sendNvimInput("<CR>")
     } else {
-      NotesService.runNvimCommand(command)
+      const normalized = command.toLowerCase()
+      if (/^(w|write)(!?)$/.test(normalized)) {
+        NotesService.addNvimCommandHistory(command)
+        NotesService.sendNvimInput("<Esc>")
+        if (!NotesService.saveAfterNvimSync())
+          root.saveNoteFromSnapshot()
+      } else if (/^(q|quit)(!?)$/.test(normalized)) {
+        NotesService.addNvimCommandHistory(command)
+        NotesService.sendNvimInput("<Esc>")
+        NotesService.closeDocument(NotesService.currentIndex)
+      } else if (/^(qa|qall)(!?)$/.test(normalized)) {
+        NotesService.addNvimCommandHistory(command)
+        NotesService.sendNvimInput("<Esc>")
+        root.setNotesVisible(false)
+      } else {
+        NotesService.sendNvimInput("<CR>")
+      }
     }
     Qt.callLater(function() {
       if (notesPopup.visible)
         noteEditor.forceActiveFocus()
     })
+  }
+
+  function handleNvimCommandKey(event) {
+    if (root.nvimCommandSubmitting) {
+      event.accepted = true
+      return
+    }
+    if (event.key === Qt.Key_Escape) {
+      root.closeNvimCommandMode()
+      event.accepted = true
+      return
+    }
+    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+      root.nvimCommandSubmitting = NotesService.submitNvimCommandLine()
+      event.accepted = true
+      return
+    }
+    const keys = root.keyForNvim(event)
+    if (keys)
+      NotesService.sendNvimInput(keys)
+    event.accepted = true
   }
 
   function keyForNvim(event) {
@@ -116,18 +153,26 @@ BasePill {
   }
 
   function handleEditorKey(event) {
+    if (NotesService.nvimStarting) {
+      event.accepted = true
+      return
+    }
     const control = (event.modifiers & Qt.ControlModifier) !== 0
-    if (NotesService.nvimAvailable && NotesService.nvimMode.startsWith("n")
+    if (NotesService.nvimAvailable
+        && (NotesService.nvimMode.startsWith("n")
+          || NotesService.nvimMode.startsWith("v")
+          || NotesService.nvimMode.startsWith("V")
+          || NotesService.nvimMode.startsWith("\u0016"))
         && event.text === ":") {
       root.nvimCommandMode = true
-      nvimCommandInput.clear()
+      NotesService.sendNvimInput(":")
       Qt.callLater(function() { nvimCommandInput.forceActiveFocus() })
       event.accepted = true
       return
     }
     if (control && event.key === Qt.Key_S) {
       if (!NotesService.nvimAvailable || !NotesService.saveAfterNvimSync())
-        root.saveNote()
+        root.saveNoteFromSnapshot()
       event.accepted = true
       return
     }
@@ -166,7 +211,7 @@ BasePill {
   function sendNvimCursor(position) {
     if (!NotesService.nvimAvailable || root.applyingNvimState)
       return
-    const lines = noteEditor.text.split("\n")
+    const lines = root.editorPlainText().split("\n")
     let remaining = position
     for (let row = 0; row < lines.length; row++) {
       if (remaining <= lines[row].length) {
@@ -179,6 +224,239 @@ BasePill {
     NotesService.setNvimCursor(lastRow, Array.from(lines[lastRow]).length)
   }
 
+  function nvimModeUsesBlockCursor() {
+    const mode = NotesService.nvimMode
+    return mode.startsWith("n") || mode.startsWith("v") || mode.startsWith("V")
+      || mode.startsWith("\u0016") || mode.startsWith("s") || mode.startsWith("S")
+  }
+
+  function nvimModeLabel(mode) {
+    if (mode.startsWith("i")) return qsTr("Insert")
+    if (mode.startsWith("R")) return qsTr("Replace")
+    if (mode.startsWith("v")) return qsTr("Visual")
+    if (mode.startsWith("V")) return qsTr("Visual Line")
+    if (mode.startsWith("\u0016")) return qsTr("Visual Block")
+    if (mode.startsWith("s")) return qsTr("Select")
+    if (mode.startsWith("S")) return qsTr("Select Line")
+    if (mode.startsWith("r")) return qsTr("Replace Char")
+    if (mode.startsWith("c")) return qsTr("Command")
+    if (mode.startsWith("n")) return qsTr("Normal")
+    return mode
+  }
+
+  function nvimCharacterWidth(character) {
+    selectionMetrics.text = character
+    return selectionMetrics.advanceWidth
+  }
+
+  function nvimHighlightRole(group) {
+    const name = String(group || "").toLowerCase()
+    if (name.includes("error")) return "error"
+    if (name.includes("comment")) return "comment"
+    if (name.includes("string") || name.includes("character")) return "string"
+    if (name.includes("number") || name.includes("boolean")
+        || name.includes("constant")) return "constant"
+    if (name.includes("function") || name.includes("method")
+        || name.includes("constructor")) return "function"
+    if (name.includes("keyword") || name.includes("statement")
+        || name.includes("conditional") || name.includes("repeat")
+        || name.includes("exception") || name.includes("heading")
+        || name.includes("strong")) return "keyword"
+    if (name.includes("type") || name.includes("class")
+        || name.includes("interface") || name.includes("structure")) return "type"
+    if (name.includes("preproc") || name.includes("attribute")
+        || name.includes("special") || name.includes("markup.link")) return "special"
+    return "text"
+  }
+
+  function nvimHighlightColor(role) {
+    switch (role) {
+    case "error": return Theme.error
+    case "comment": return Theme.widgetInactiveIconColor
+    case "string": return Theme.tertiary
+    case "constant":
+    case "type": return Theme.secondary
+    case "function":
+    case "keyword": return Theme.primary
+    case "special": return Theme.warning
+    default: return Theme.widgetTextColor
+    }
+  }
+
+  function editorPlainText() {
+    return NotesService.nvimAvailable ? NotesService.currentText : noteEditor.text
+  }
+
+  function updateNvimLineStarts(text) {
+    const starts = [0]
+    let newline = -1
+    while ((newline = text.indexOf("\n", newline + 1)) >= 0)
+      starts.push(newline + 1)
+    root.nvimLineStarts = starts
+  }
+
+  function nvimLineForPosition(position) {
+    const starts = root.nvimLineStarts
+    let low = 0
+    let high = starts.length
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2)
+      if (starts[middle] <= position)
+        low = middle + 1
+      else
+        high = middle
+    }
+    return Math.max(0, low - 1)
+  }
+
+  function syncNvimHighlightRange() {
+    if (!NotesService.nvimAvailable || !notesPopup.visible || root.markdownPreview
+        || !NotesService.currentDocument
+        || root.nvimLineStarts.length <= NotesService.nvimHighlightLineLimit)
+      return
+
+    const top = editorFlickable.contentY + noteEditor.topPadding
+    const bottom = Math.min(noteEditor.height,
+      editorFlickable.contentY + editorFlickable.height)
+    const firstPosition = Math.max(0, noteEditor.positionAt(noteEditor.leftPadding, top))
+    const lastPosition = Math.max(firstPosition,
+      noteEditor.positionAt(noteEditor.leftPadding, bottom))
+    const firstVisibleRow = root.nvimLineForPosition(firstPosition)
+    const lastVisibleRow = root.nvimLineForPosition(lastPosition)
+    const chunkSize = NotesService.nvimHighlightChunkLines
+    const startRow = Math.floor(firstVisibleRow / chunkSize) * chunkSize
+    const endRow = Math.min(root.nvimLineStarts.length,
+      Math.max(startRow + chunkSize,
+        Math.ceil((lastVisibleRow + 1) / chunkSize) * chunkSize))
+    const rangeKey = NotesService.currentDocument.id + ":" + startRow + ":" + endRow
+    if (rangeKey === root.lastNvimHighlightRange)
+      return
+    root.lastNvimHighlightRange = rangeKey
+    NotesService.setNvimHighlightRange(startRow, endRow)
+  }
+
+  function escapeHtml(text) {
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+  }
+
+  function buildNvimRichText(text, highlights) {
+    const lines = String(text).split("\n")
+    const groups = lines.map(line =>
+      Array.from(line, () => ""))
+    for (const highlight of highlights || []) {
+      const row = Math.max(0, Math.min(Number(highlight.row) || 0, lines.length - 1))
+      const start = Math.max(0, Number(highlight.start_column) || 0)
+      const end = Math.min(groups[row].length,
+        Math.max(start, Number(highlight.end_column) || 0))
+      for (let column = start; column < end; column++)
+        groups[row][column] = String(highlight.group || "")
+    }
+
+    let markup = "<pre style=\"margin:0; white-space:pre-wrap; font-family:'"
+      + root.escapeHtml(noteEditor.font.family) + "'; font-size:"
+      + noteEditor.font.pixelSize + "px;\">"
+    for (let row = 0; row < lines.length; row++) {
+      const characters = Array.from(lines[row])
+      let column = 0
+      while (column < characters.length) {
+        const role = root.nvimHighlightRole(groups[row][column])
+        let end = column + 1
+        while (end < characters.length
+            && root.nvimHighlightRole(groups[row][end]) === role)
+          end++
+        const color = root.nvimHighlightColor(role).toString()
+        markup += "<span style=\"color:" + color + "\">"
+          + root.escapeHtml(characters.slice(column, end).join(""))
+          + "</span>"
+        column = end
+      }
+      if (row < lines.length - 1)
+        markup += "\n"
+    }
+    return markup + "</pre>"
+  }
+
+  function editorTextPosition(row, column) {
+    const lines = root.editorPlainText().split("\n")
+    const targetRow = Math.max(0, Math.min(row, lines.length - 1))
+    let position = 0
+    for (let index = 0; index < targetRow; index++)
+      position += lines[index].length + 1
+    return position + Array.from(lines[targetRow])
+      .slice(0, Math.max(0, column)).join("").length
+  }
+
+  function appendNvimSelectionRect(rects, x, y, width, height) {
+    if (width <= 0 || height <= 0)
+      return
+    const last = rects.length ? rects[rects.length - 1] : null
+    if (last && Math.abs(last.y - y) < 0.5
+        && Math.abs(last.x + last.width - x) < 0.5) {
+      rects[rects.length - 1] = {
+        x: last.x, y: last.y, width: last.width + width,
+        height: Math.max(last.height, height)
+      }
+    } else {
+      rects.push({ x: x, y: y, width: width, height: height })
+    }
+  }
+
+  function buildNvimSelectionRects(selections) {
+    const rects = []
+    const lines = root.editorPlainText().split("\n")
+    const rightEdge = noteEditor.width - noteEditor.rightPadding
+    const cellWidth = Math.max(1, root.nvimCharacterWidth(" "))
+
+    for (const selection of selections || []) {
+      const row = Math.max(0, Math.min(selection.row, lines.length - 1))
+      const chars = Array.from(lines[row])
+      const start = Math.max(0, Math.min(selection.start_column, chars.length))
+      const end = Math.max(start, Math.min(selection.end_column, chars.length))
+      const lineStart = editorTextPosition(row, start)
+
+      for (let column = start; column < end; column++) {
+        const selectedCharacter = chars[column]
+        const position = editorTextPosition(row, column)
+        const rect = noteEditor.positionToRectangle(position)
+        const nextRect = noteEditor.positionToRectangle(
+          position + selectedCharacter.length)
+        const width = Math.abs(rect.y - nextRect.y) < 0.5
+          && nextRect.x > rect.x
+          ? nextRect.x - rect.x
+          : Math.max(1, root.nvimCharacterWidth(selectedCharacter))
+        root.appendNvimSelectionRect(rects, rect.x, rect.y, width, rect.height)
+
+        if (selection.fill_to_end
+            && (column + 1 === end
+                || Math.abs(rect.y - nextRect.y) >= 0.5)) {
+          root.appendNvimSelectionRect(rects, rect.x + width, rect.y,
+            Math.max(0, rightEdge - rect.x - width), rect.height)
+        }
+      }
+
+      if (selection.kind === "line") {
+        const endRect = noteEditor.positionToRectangle(
+          editorTextPosition(row, chars.length))
+        root.appendNvimSelectionRect(rects, endRect.x, endRect.y,
+          Math.max(0, rightEdge - endRect.x), endRect.height)
+      } else if (selection.kind === "block"
+          && selection.end_column > chars.length) {
+        const virtualStart = Math.max(selection.start_column, chars.length)
+        const rect = noteEditor.positionToRectangle(
+          editorTextPosition(row, chars.length))
+        const x = rect.x + (virtualStart - chars.length) * cellWidth
+        root.appendNvimSelectionRect(rects, x, rect.y,
+          (selection.end_column - virtualStart) * cellWidth, rect.height)
+      } else if (selection.fill_to_end && start === end) {
+        const rect = noteEditor.positionToRectangle(lineStart)
+        root.appendNvimSelectionRect(rects, rect.x, rect.y,
+          Math.max(0, rightEdge - rect.x), rect.height)
+      }
+    }
+    return rects
+  }
+
   function openNote() {
     chooserInitialPath = NotesService.notesDirectory + "/"
     if (!NotesService.chooseFile(root, "open", chooserInitialPath))
@@ -186,6 +464,12 @@ BasePill {
   }
 
   function saveNote() {
+    if (NotesService.nvimAvailable && NotesService.saveAfterNvimSync())
+      return
+    root.saveNoteFromSnapshot()
+  }
+
+  function saveNoteFromSnapshot() {
     if (!NotesService.currentDocument)
       return
     if (!NotesService.currentDocument.path) {
@@ -198,7 +482,7 @@ BasePill {
       }
       return
     }
-    NotesService.saveCurrent()
+    NotesService.saveDocument(NotesService.currentDocument.id)
   }
 
   function fallbackToQtFileDialog(operation, initialPath) {
@@ -235,7 +519,7 @@ BasePill {
       noteEditor.forceActiveFocus()
       return
     }
-    const text = noteEditor.text
+    const text = root.editorPlainText()
     let index = text.toLowerCase().indexOf(query.toLowerCase(), noteEditor.cursorPosition)
     if (index < 0)
       index = text.toLowerCase().indexOf(query.toLowerCase())
@@ -260,21 +544,76 @@ BasePill {
 
   }
 
+  TextMetrics {
+    id: selectionMetrics
+    font: noteEditor.font
+  }
+
+  Timer {
+    id: nvimHighlightRangeTimer
+    interval: 50
+    repeat: false
+    onTriggered: root.syncNvimHighlightRange()
+  }
+
   Connections {
     target: NotesService
-    function onNvimSaveRequested() { root.saveNote() }
-    function onNvimStateChanged(text, row, column, mode) {
+    function onNvimSaveRequested() { root.saveNoteFromSnapshot() }
+    function onNvimCommandSubmitted(commandLine) {
+      root.executeNvimCommand(commandLine)
+    }
+    function onNvimAvailableChanged() {
+      if (!NotesService.nvimAvailable) {
+        root.nvimCommandMode = false
+        root.nvimCommandSubmitting = false
+        root.lastNvimHighlightRange = ""
+      }
+    }
+    function onCurrentIndexChanged() {
+      root.lastNvimHighlightRange = ""
+      nvimHighlightRangeTimer.restart()
+    }
+    function onNvimErrorChanged() {
+      if (NotesService.nvimError !== "")
+        root.nvimCommandSubmitting = false
+    }
+    function onNvimStateChanged(text, row, column, mode, selections, cursors, highlights) {
+      if (!String(mode).startsWith("c") && root.nvimCommandMode
+          && !root.nvimCommandSubmitting) {
+        root.nvimCommandMode = false
+        Qt.callLater(function() { noteEditor.forceActiveFocus() })
+      }
       root.applyingNvimState = true
+      root.nvimCursors = cursors || []
+      root.nvimSelections = selections || []
+      const sourceText = String(text)
+      const nextHighlights = highlights || []
+      const highlightKey = JSON.stringify(nextHighlights)
+      const textChanged = root.nvimDisplaySourceText !== sourceText
+      const preserveViewport = !textChanged
+        && NotesService.nvimSnapshotOperation === "set_highlight_range"
+      const previousContentY = editorFlickable.contentY
+      root.preservingNvimViewport = preserveViewport
+      if (textChanged) {
+        root.nvimDisplaySourceText = sourceText
+        root.updateNvimLineStarts(sourceText)
+      }
+      if (textChanged || root.nvimDisplayHighlightKey !== highlightKey) {
+        root.nvimHighlights = nextHighlights
+        root.nvimDisplayHighlightKey = highlightKey
+        root.nvimDisplayText = root.buildNvimRichText(sourceText, nextHighlights)
+      }
       Qt.callLater(function() {
-        const lines = noteEditor.text.split("\n")
-        const targetRow = Math.max(0, Math.min(row, lines.length - 1))
-        let position = 0
-        for (let index = 0; index < targetRow; index++)
-          position += lines[index].length + 1
-        position += Array.from(lines[targetRow]).slice(0, Math.max(0, column)).join("").length
-        noteEditor.cursorPosition = position
+        noteEditor.cursorPosition = root.editorTextPosition(row, column)
+        root.nvimSelectionRects =
+          root.buildNvimSelectionRects(root.nvimSelections)
+        if (preserveViewport)
+          editorFlickable.contentY = previousContentY
+        else
+          editorFlickable.ensureCursorVisible()
+        root.preservingNvimViewport = false
         root.applyingNvimState = false
-        editorFlickable.ensureCursorVisible()
+        nvimHighlightRangeTimer.restart()
       })
     }
     function onFileChooserFinished(requester, operation, exitCode, output, errorOutput) {
@@ -730,6 +1069,13 @@ BasePill {
             contentWidth: width
             contentHeight: editorRow.height
             flickableDirection: Flickable.VerticalFlick
+            onContentYChanged: nvimHighlightRangeTimer.restart()
+            onContentHeightChanged: nvimHighlightRangeTimer.restart()
+            onHeightChanged: nvimHighlightRangeTimer.restart()
+            onVisibleChanged: {
+              if (visible)
+                nvimHighlightRangeTimer.restart()
+            }
 
             function ensureCursorVisible() {
               const cursor = noteEditor.cursorRectangle
@@ -770,18 +1116,19 @@ BasePill {
                 id: noteEditor
                 width: parent.width - lineNumbers.width - parent.spacing
                 height: parent.height
-                text: NotesService.currentText
-                enabled: NotesService.ready
+                text: NotesService.nvimAvailable
+                  ? root.nvimDisplayText : NotesService.currentText
+                enabled: NotesService.ready && !NotesService.nvimStarting
                 readOnly: NotesService.nvimAvailable
                 cursorVisible: NotesService.nvimAvailable && activeFocus
                 cursorDelegate: Rectangle {
-                  width: NotesService.nvimMode.startsWith("n")
+                  width: root.nvimModeUsesBlockCursor()
                     ? Math.max(2, noteEditor.font.pixelSize * 0.6)
                     : 2
-                  height: NotesService.nvimMode.startsWith("n")
+                  height: root.nvimModeUsesBlockCursor()
                     ? noteEditor.font.pixelSize * 1.35
                     : noteEditor.cursorRectangle.height
-                  color: NotesService.nvimMode.startsWith("n")
+                  color: root.nvimModeUsesBlockCursor()
                     ? Theme.withAlpha(Theme.primary, 0.55)
                     : Theme.primary
                 }
@@ -793,20 +1140,67 @@ BasePill {
                 wrapMode: TextEdit.Wrap
                 selectByMouse: true
                 selectByKeyboard: true
-                textFormat: TextEdit.PlainText
+                textFormat: NotesService.nvimAvailable
+                  ? TextEdit.RichText : TextEdit.PlainText
                 leftPadding: 4
                 rightPadding: 8
                 topPadding: 8
                 bottomPadding: 8
-                background: Item {}
-                onTextChanged: NotesService.editCurrentText(text)
+                background: Item {
+                  clip: true
+                  Repeater {
+                    model: root.nvimSelectionRects
+                    delegate: Rectangle {
+                      visible: NotesService.nvimAvailable
+                      x: modelData.x
+                      y: modelData.y
+                      width: modelData.width
+                      height: modelData.height
+                      color: Theme.withAlpha(Theme.primary, 0.3)
+                    }
+                  }
+                }
+                Repeater {
+                  model: root.nvimCursors
+                  delegate: Rectangle {
+                    readonly property int textPosition:
+                      root.editorTextPosition(modelData.row, modelData.column)
+                    readonly property rect cursorRect:
+                      noteEditor.positionToRectangle(textPosition)
+                    visible: NotesService.nvimAvailable && noteEditor.activeFocus
+                    x: cursorRect.x
+                    y: cursorRect.y
+                    width: root.nvimModeUsesBlockCursor()
+                      ? Math.max(2, noteEditor.font.pixelSize * 0.6)
+                      : 2
+                    height: root.nvimModeUsesBlockCursor()
+                      ? cursorRect.height
+                      : noteEditor.cursorRectangle.height
+                    color: root.nvimModeUsesBlockCursor()
+                      ? Theme.withAlpha(Theme.primary, 0.55)
+                      : Theme.primary
+                  }
+                }
+                onTextChanged: {
+                  if (!NotesService.nvimAvailable)
+                    NotesService.editCurrentText(text)
+                }
                 onCursorPositionChanged: {
                   editorFlickable.ensureCursorVisible()
                   if (!root.applyingNvimState)
                     root.sendNvimCursor(cursorPosition)
                 }
-                onCursorRectangleChanged: editorFlickable.ensureCursorVisible()
+                onCursorRectangleChanged: {
+                  if (!root.preservingNvimViewport)
+                    editorFlickable.ensureCursorVisible()
+                }
                 onContentHeightChanged: editorFlickable.ensureCursorVisible()
+                onWidthChanged: Qt.callLater(function() {
+                  root.nvimSelectionRects =
+                    root.buildNvimSelectionRects(root.nvimSelections)
+                  nvimHighlightRangeTimer.restart()
+                })
+                onHeightChanged: nvimHighlightRangeTimer.restart()
 
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: event => root.handleEditorKey(event)
@@ -847,6 +1241,9 @@ BasePill {
                 id: nvimCommandInput
                 width: parent.width - Theme.spaceXL
                 height: parent.height
+                text: NotesService.nvimCommandLine
+                cursorPosition: NotesService.nvimCommandPosition
+                readOnly: true
                 color: Theme.widgetTextColor
                 selectionColor: Theme.withAlpha(Theme.primary, 0.3)
                 selectedTextColor: Theme.widgetTextColor
@@ -855,8 +1252,8 @@ BasePill {
                 verticalAlignment: TextInput.AlignVCenter
                 selectByMouse: true
                 clip: true
-                onAccepted: root.executeNvimCommand()
-                Keys.onEscapePressed: root.closeNvimCommandMode()
+                Keys.priority: Keys.BeforeItem
+                Keys.onPressed: event => root.handleNvimCommandKey(event)
               }
             }
           }
@@ -1020,20 +1417,21 @@ BasePill {
           }
 
           Text {
-            width: 96
+            id: nvimModeStatus
+            width: implicitWidth
             height: parent.height
             text: NotesService.nvimAvailable
-              ? "Neovim · " + NotesService.nvimMode
+              ? "Neovim · " + (root.nvimCommandMode
+                ? qsTr("Command") : root.nvimModeLabel(NotesService.nvimMode))
               : (NotesService.nvimStarting ? qsTr("Neovim…") : qsTr("TextArea"))
             color: NotesService.nvimAvailable ? Theme.primary : Theme.widgetInactiveIconColor
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
             verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
           }
 
           Text {
-            width: parent.width - noteStats.width - 96 - parent.spacing * 2
+            width: parent.width - noteStats.width - nvimModeStatus.width - parent.spacing * 2
             height: parent.height
             text: NotesService.error !== "" ? NotesService.error
               : (NotesService.nvimError !== "" && NotesService.nvimAvailable ? NotesService.nvimError

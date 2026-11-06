@@ -78,5 +78,22 @@ default control style does not match the shell theme. For every such control:
   `README.md`. Keep this rule for all AI agents and contributors.
 - Keep UI widgets declarative and put compositor/system integration in
   `Services/`.
+
+## Notes editor backend authority
+
+- When the optional headless Neovim backend is available, it is the sole source
+  of truth for Notes buffer text, active document, cursor/mode, selections,
+  command-line state, and syntax highlights. `NotesService` document/session
+  data is a persistence mirror updated from accepted Neovim snapshots.
+- Route editing keys and buffer-selection requests through the bridge. Only an
+  explicit tab click or document lifecycle action may request a Neovim buffer
+  selection; do not select buffers as a side effect of processing backend
+  snapshots or changing the mirrored current index.
+- Do not overwrite an existing Neovim buffer with mirrored QML text when
+  selecting it. Seed a buffer from persisted text only when creating/mapping a
+  new document buffer. Save from a fresh backend snapshot.
+- The Qt Quick text editor is an editable fallback only while Neovim is
+  unavailable. While Neovim is active, render its snapshots read-only and do
+  not maintain a second editable copy or text-rendering overlay.
 - Use `qmllint -I . <changed-files>` for focused QML validation and
   `git diff --check` for whitespace validation.
