@@ -49,6 +49,8 @@ relative (`:set nu relativenumber`).
 > bar degrades gracefully on other compositors, simply hiding that widget.
 > On Hyprland, right-click an inactive workspace to view live previews of its
 > open windows using Quickshell's native Wayland screencopy support.
+> Right-clicking the workspace pill outside its numbered buttons opens the
+> optional ScrollOverview live workspace overview.
 > When CPU and memory widgets are both enabled, click each metric in the
 > combined pill to expand its reading; right-click either metric to open the
 > corresponding live System Monitor tab. Click a GPU reading to open the GPU
@@ -69,6 +71,16 @@ relative (`:set nu relativenumber`).
   supporting `wlr-layer-shell`.
 - **Hyprland integration:** `hyprctl` is used for workspace state and related
   compositor actions; those widgets are unavailable outside Hyprland.
+- **Workspace overview (optional):** the [ScrollOverview Hyprland
+  plugin](https://github.com/yayuuu/hyprland-scroll-overview) provides the live
+  overview opened by right-clicking the workspace pill background. Numbered
+  workspace buttons continue to provide their own previews and workspace
+  switching without the plugin; the overview action reports an error if it is
+  unavailable. Install with `hyprpm add
+  https://github.com/yayuuu/hyprland-scroll-overview`, enable with
+  `hyprpm enable scrolloverview`, and reload plugins with `hyprpm reload`.
+  Hyprland plugins are ABI-sensitive; use a build compatible with the exact
+  installed Hyprland version.
 - **Battery power modes (optional):** ASUS laptops use `asusctl` to select
   Quiet, Balanced, and Performance profiles. Other systems use
   `powerprofilesctl` from power-profiles-daemon for the profiles supported by

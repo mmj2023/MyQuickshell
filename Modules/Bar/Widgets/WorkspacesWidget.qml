@@ -86,8 +86,36 @@ BasePill {
     specialPopupOpen = true
   }
 
+  function openWorkspaceOverview() {
+    const target = monitorName ? "toggle " + monitorName : "toggle"
+    workspaceOverviewProcess.command = [
+      "hyprctl",
+      "dispatch",
+      "hl.plugin.scrolloverview.overview(" + JSON.stringify(target) + ")"
+    ]
+    workspaceOverviewProcess.running = false
+    workspaceOverviewProcess.running = true
+  }
+
   onRightClicked: function(rootX, rootY) {
-    root.toggleSpecialPopup(rootX, rootY)
+    root.openWorkspaceOverview()
+  }
+
+  Process {
+    id: workspaceOverviewProcess
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        const response = text.trim()
+        if (response && response !== "ok")
+          console.warn("ScrollOverview request returned:", response)
+      }
+    }
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0)
+        console.warn("ScrollOverview request failed with exit code", exitCode, "status", exitStatus)
+    }
   }
 
   PopupWindow {
@@ -243,7 +271,49 @@ BasePill {
 
   function refreshPreviewWindows() {
     Hyprland.refreshToplevels()
-    previewWindows = root.collectWorkspaceWindows(previewWorkspaceId)
+    if (!previewClientsProcess.running)
+      previewClientsProcess.running = true
+  }
+
+  function updatePreviewWindows(clientsJson) {
+    try {
+      const clients = JSON.parse(clientsJson)
+      if (!Array.isArray(clients))
+        throw new Error("Hyprland returned an invalid client list")
+
+      const geometryByAddress = {}
+      for (const client of clients) {
+        const address = String(client.address || "").replace(/^0x/i, "").toLowerCase()
+        const at = client.at
+        const size = client.size
+        if (!address || !Array.isArray(at) || !Array.isArray(size)
+            || at.length < 2 || size.length < 2)
+          continue
+
+        const values = [Number(at[0]), Number(at[1]), Number(size[0]), Number(size[1])]
+        if (!values.every(Number.isFinite) || values[2] <= 0 || values[3] <= 0)
+          continue
+
+        geometryByAddress[address] = {
+          x: values[0],
+          y: values[1],
+          width: values[2],
+          height: values[3]
+        }
+      }
+
+      previewWindows = root.collectWorkspaceWindows(previewWorkspaceId).map(function(window) {
+        const address = String(window.address || "").replace(/^0x/i, "").toLowerCase()
+        return {
+          wayland: window.wayland,
+          title: window.title || window.wayland.title || qsTr("Application"),
+          geometry: geometryByAddress[address] || null
+        }
+      })
+    } catch (error) {
+      previewWindows = []
+      console.warn("Failed to read workspace window positions:", error)
+    }
   }
 
   function togglePreview(workspaceId, button) {
@@ -262,6 +332,25 @@ BasePill {
     previewY = position.y + Theme.spaceXS
     previewOpen = true
     root.refreshPreviewWindows()
+  }
+
+  Process {
+    id: previewClientsProcess
+    command: ["hyprctl", "-j", "clients"]
+    running: false
+
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.updatePreviewWindows(text.trim())
+    }
+
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0) {
+        root.previewWindows = []
+        console.warn("Failed to query Hyprland window positions (exit code", exitCode,
+          "status", exitStatus, ")")
+      }
+    }
   }
 
   PopupWindow {
@@ -307,34 +396,55 @@ BasePill {
         Item {
           id: previewCanvas
 
-          readonly property int windowCount: root.previewWindows.length
-          readonly property int columns: Math.max(1, Math.ceil(Math.sqrt(windowCount)))
-          readonly property int rows: Math.max(1, Math.ceil(windowCount / columns))
-          readonly property real cellWidth: width / columns
-          readonly property real cellHeight: height / rows
+          readonly property var previewMonitor: root.parentScreen
+            ? Hyprland.monitorFor(root.parentScreen) : null
+          readonly property real monitorScale: previewMonitor && previewMonitor.scale > 0
+            ? previewMonitor.scale : 1
+          readonly property real workspaceWidth: Math.max(1, previewMonitor && previewMonitor.width > 0
+            ? previewMonitor.width / monitorScale
+            : (root.parentScreen ? root.parentScreen.width : width))
+          readonly property real workspaceHeight: Math.max(1, previewMonitor && previewMonitor.height > 0
+            ? previewMonitor.height / monitorScale
+            : (root.parentScreen ? root.parentScreen.height : height))
+          readonly property real sceneScale: Math.min(width / workspaceWidth, height / workspaceHeight)
+          readonly property real sceneX: (width - workspaceWidth * sceneScale) / 2
+          readonly property real sceneY: (height - workspaceHeight * sceneScale) / 2
+          readonly property real monitorX: previewMonitor ? previewMonitor.x : 0
+          readonly property real monitorY: previewMonitor ? previewMonitor.y : 0
+          readonly property int visibleWindowCount: root.previewWindows.filter(
+            function(window) { return window.geometry !== null }).length
 
           width: parent.width
           height: 218
           clip: true
 
+          Rectangle {
+            anchors.fill: parent
+            color: Theme.surfaceContainer
+          }
+
           Repeater {
             model: root.previewWindows
 
             delegate: Rectangle {
-              required property int index
               required property var modelData
 
-              x: (index % previewCanvas.columns) * previewCanvas.cellWidth + 2
-              y: Math.floor(index / previewCanvas.columns) * previewCanvas.cellHeight + 2
-              width: Math.max(1, previewCanvas.cellWidth - 4)
-              height: Math.max(1, previewCanvas.cellHeight - 4)
+              visible: modelData.geometry !== null
+              x: modelData.geometry
+                ? previewCanvas.sceneX + (modelData.geometry.x - previewCanvas.monitorX) * previewCanvas.sceneScale
+                : 0
+              y: modelData.geometry
+                ? previewCanvas.sceneY + (modelData.geometry.y - previewCanvas.monitorY) * previewCanvas.sceneScale
+                : 0
+              width: modelData.geometry ? modelData.geometry.width * previewCanvas.sceneScale : 0
+              height: modelData.geometry ? modelData.geometry.height * previewCanvas.sceneScale : 0
               radius: Theme.cornerRadius
               color: Theme.surfaceContainer
               clip: true
 
               ScreencopyView {
                   anchors.fill: parent
-                  captureSource: modelData.wayland ?? null
+                  captureSource: modelData.wayland
                   live: root.previewOpen
                   constraintSize.width: parent.width
                   constraintSize.height: parent.height
@@ -351,7 +461,7 @@ BasePill {
                       anchors.fill: parent
                       anchors.leftMargin: 6
                       anchors.rightMargin: 6
-                      text: modelData.title || modelData.wayland.title || qsTr("Application")
+                      text: modelData.title
                       color: Theme.widgetTextColor
                       font.pixelSize: 10
                       elide: Text.ElideRight
@@ -363,8 +473,10 @@ BasePill {
 
           Text {
             anchors.centerIn: parent
-            visible: root.previewWindows.length === 0
-            text: qsTr("No open windows")
+            visible: previewCanvas.visibleWindowCount === 0
+            text: root.previewWindows.length === 0
+              ? qsTr("No open windows")
+              : qsTr("Window positions unavailable")
             color: Theme.widgetInactiveIconColor
             font.pixelSize: 13
           }
