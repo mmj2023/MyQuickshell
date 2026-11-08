@@ -15,8 +15,25 @@ def emit(message):
         print(json.dumps(message, ensure_ascii=False), flush=True)
 
 
+def showcmd_text(content):
+    chunks = []
+
+    def collect(value):
+        if isinstance(value, (list, tuple)):
+            if len(value) >= 2 and isinstance(value[1], str):
+                chunks.append(value[1])
+                return
+            for item in value:
+                collect(item)
+
+    collect(content)
+    return "".join(chunks)
+
+
 output_lock = threading.Lock()
 snapshot_tasks = queue.Queue()
+showcmd_lock = threading.Lock()
+last_showcmd = None
 
 
 document_buffers = {}
@@ -218,6 +235,7 @@ def search_highlights(nvim, buffer, command_type, command_line):
             str(nvim.options["inccommand"]),
             int(nvim.eval("v:hlsearch")),
             str(nvim.call("getreg", "/")),
+            bool(nvim.options["showcmd"]),
             bool(nvim.options["ignorecase"]),
             bool(nvim.options["smartcase"]),
             bool(nvim.options["magic"]),
@@ -247,6 +265,7 @@ def search_highlights(nvim, buffer, command_type, command_line):
             hlsearch = vim.o.hlsearch,
             incsearch = vim.o.incsearch,
             inccommand = vim.o.inccommand,
+            showcmd = vim.o.showcmd,
             ignorecase = vim.o.ignorecase,
             smartcase = vim.o.smartcase,
             tabstop = vim.bo[buffer].tabstop,
@@ -385,6 +404,7 @@ def search_highlights(nvim, buffer, command_type, command_line):
         str(nvim.options["inccommand"]),
         int(nvim.eval("v:hlsearch")),
         str(nvim.call("getreg", "/")),
+        bool(nvim.options["showcmd"]),
         bool(nvim.options["ignorecase"]),
         bool(nvim.options["smartcase"]),
         bool(nvim.options["magic"]),
@@ -761,14 +781,47 @@ def run_snapshot_worker(nvim):
             emit({"type": "error", "id": request_id, "message": str(error)})
 
 
+def run_showcmd_listener(client):
+    global last_showcmd
+
+    def on_notification(name, arguments):
+        global last_showcmd
+        if name != "redraw":
+            return
+        for event in arguments:
+            if len(event) < 2 or event[0] != "msg_showcmd":
+                continue
+            value = showcmd_text(event[1])
+            with showcmd_lock:
+                if value == last_showcmd:
+                    continue
+                last_showcmd = value
+            emit({"type": "showcmd", "value": value})
+
+    try:
+        client.run_loop(None, on_notification)
+    except Exception as error:
+        if not bridge_stopping:
+            emit({"type": "showcmd_error", "message": str(error)})
+
+
 socket_directory = None
 socket_path = None
 input_nvim = None
 nvim = None
+ui_nvim = None
+ui_thread = None
+bridge_stopping = False
 
 
 def cleanup():
-    for client in (input_nvim, nvim):
+    global bridge_stopping
+    bridge_stopping = True
+    if ui_nvim is not None:
+        ui_nvim.stop_loop()
+    if ui_thread is not None and ui_thread.is_alive():
+        ui_thread.join(timeout=1)
+    for client in (ui_nvim, input_nvim, nvim):
         if client is not None:
             try:
                 client.close()
@@ -806,6 +859,12 @@ try:
     nvim.options["hlsearch"] = False
     nvim.current.window.options["number"] = True
     nvim.current.window.options["relativenumber"] = True
+    ui_nvim = pynvim.attach("socket", path=socket_path)
+    ui_nvim.ui_attach(80, 24, rgb=True, ext_messages=True)
+    ui_thread = threading.Thread(
+        target=run_showcmd_listener, args=(ui_nvim,), daemon=True
+    )
+    ui_thread.start()
     input_nvim.input("i")
     snapshot_thread = threading.Thread(
         target=run_snapshot_worker, args=(nvim,), daemon=True

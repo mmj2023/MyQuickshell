@@ -1603,6 +1603,18 @@ BasePill {
           }
 
           Text {
+            id: nvimShowcmdStatus
+            visible: NotesService.nvimAvailable && NotesService.nvimShowcmd !== ""
+            width: visible ? implicitWidth : 0
+            height: parent.height
+            text: NotesService.nvimShowcmd
+            color: Theme.widgetInactiveIconColor
+            font.family: Theme.monoFontFamily
+            font.pixelSize: Theme.fontSizeSmall
+            verticalAlignment: Text.AlignVCenter
+          }
+
+          Text {
             id: nvimRecordingStatus
             visible: NotesService.nvimAvailable
               && NotesService.nvimRecordingRegister !== ""
@@ -1617,8 +1629,8 @@ BasePill {
 
           Text {
             width: parent.width - noteStats.width - nvimModeStatus.width
-              - nvimRecordingStatus.width
-              - parent.spacing * 3
+              - nvimShowcmdStatus.width - nvimRecordingStatus.width
+              - parent.spacing * 4
             height: parent.height
             text: NotesService.error !== "" ? NotesService.error
               : (NotesService.nvimError !== "" && NotesService.nvimAvailable ? NotesService.nvimError

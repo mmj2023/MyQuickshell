@@ -27,6 +27,7 @@ Singleton {
   property bool nvimStarting: false
   property string nvimError: ""
   property string nvimMode: ""
+  property string nvimShowcmd: ""
   property string nvimRecordingRegister: ""
   property string nvimCommandType: ""
   property int nvimRow: 0
@@ -77,8 +78,14 @@ Singleton {
     if (!nvimBridge.running && !nvimAvailable) {
       nvimStarting = true
       nvimError = ""
+      clearNvimShowcmd()
       nvimBridge.running = true
     }
+  }
+
+  function clearNvimShowcmd() {
+    nvimShowcmdClearTimer.stop()
+    nvimShowcmd = ""
   }
 
   function sendNvimRequest(operation, values) {
@@ -168,8 +175,25 @@ Singleton {
     if (message.type === "unavailable") {
       nvimStarting = false
       nvimAvailable = false
+      clearNvimShowcmd()
       nvimError = message.message || qsTr("Neovim or its Python client is unavailable.")
       console.info("NotesService: using the built-in editor:", nvimError)
+      return
+    }
+    if (message.type === "showcmd") {
+      const value = String(message.value || "")
+      if (value) {
+        nvimShowcmdClearTimer.stop()
+        nvimShowcmd = value
+      } else if (nvimShowcmd !== "") {
+        nvimShowcmdClearTimer.restart()
+      }
+      return
+    }
+    if (message.type === "showcmd_error") {
+      clearNvimShowcmd()
+      nvimError = qsTr("Neovim key display stopped: %1").arg(message.message || qsTr("unknown error"))
+      console.warn("NotesService Neovim showcmd listener failed:", message.message || "Unknown error")
       return
     }
     if (message.type === "error") {
@@ -207,6 +231,8 @@ Singleton {
     nvimCommandType = String(message.command_type || "")
     nvimRow = Number(message.row) || 0
     nvimEditorOptions = message.editor_options || ({})
+    if (!nvimEditorOptions.showcmd)
+      clearNvimShowcmd()
     nvimSearchHighlights = message.search_highlights || []
     nvimSnapshotOperation = String(message.operation || "")
     nvimCommandLine = String(message.command_line || "")
@@ -283,6 +309,13 @@ Singleton {
     return true
   }
 
+  Timer {
+    id: nvimShowcmdClearTimer
+    interval: 2000
+    repeat: false
+    onTriggered: root.nvimShowcmd = ""
+  }
+
   property Process nvimBridge: Process {
     id: nvimBridge
     command: ["python3", "-u", Quickshell.shellDir + "/Services/NotesNvimBridge.py"]
@@ -298,9 +331,11 @@ Singleton {
       if (root.nvimStarting) {
         root.nvimStarting = false
         root.nvimAvailable = false
+        root.clearNvimShowcmd()
         root.nvimError = qsTr("Neovim backend exited during startup (status %1).").arg(exitCode)
       } else if (root.nvimAvailable) {
         root.nvimAvailable = false
+        root.clearNvimShowcmd()
         root.nvimError = qsTr("Neovim backend stopped (status %1); using the built-in editor.").arg(exitCode)
       }
     }
