@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import qs.Common
 import qs.Modules.Bar.Widgets
 
@@ -8,6 +9,7 @@ Rectangle {
   property string iconName: ""
   property string title: ""
   property string subtitle: ""
+  property bool sensitiveSubtitle: false
   property bool active: false
   property bool available: true
 
@@ -47,13 +49,34 @@ Rectangle {
         elide: Text.ElideRight
       }
 
-      Text {
+      Item {
+        id: subtitleContainer
         width: parent.width
-        text: root.subtitle
-        color: Theme.widgetInactiveIconColor
-        font.family: Theme.fontFamily
-        font.pixelSize: Theme.fontSizeSmall - 2
-        elide: Text.ElideRight
+        height: subtitleText.implicitHeight
+
+        Text {
+          id: subtitleText
+          anchors.fill: parent
+          text: root.subtitle
+          color: Theme.widgetInactiveIconColor
+          font.family: Theme.fontFamily
+          font.pixelSize: Theme.fontSizeSmall - 2
+          elide: Text.ElideRight
+          layer.enabled: root.sensitiveSubtitle && !subtitleHover.containsMouse
+          layer.effect: MultiEffect {
+            blurEnabled: true
+            blur: 1.0
+          }
+        }
+
+        MouseArea {
+          id: subtitleHover
+          anchors.fill: parent
+          visible: root.sensitiveSubtitle
+          acceptedButtons: Qt.NoButton
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+        }
       }
     }
   }

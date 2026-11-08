@@ -1,5 +1,7 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
+import QtQuick.Layouts
 import Quickshell
 import Quickshell.Bluetooth
 import Quickshell.Networking
@@ -24,10 +26,20 @@ BasePill {
   property bool colorPickerOpen: false
   property int colorPickerX: 0
   property int colorPickerY: 0
+  property string selectedBrightnessDevice: ""
+  property bool brightnessDevicesExpanded: false
 
   readonly property var wifiDevice: Networking.devices
     ? Networking.devices.values.find(device => device.type === DeviceType.Wifi) || null
     : null
+  readonly property var wiredDevice: Networking.devices
+    ? Networking.devices.values.find(device => device.type === DeviceType.Wired && device.connected)
+      || Networking.devices.values.find(device => device.type === DeviceType.Wired)
+      || null
+    : null
+  readonly property bool hasNetworkDevice: !!root.wifiDevice || !!root.wiredDevice
+  readonly property bool hasActiveNetworkDevice: !!(root.wifiDevice && root.wifiDevice.connected)
+    || !!(root.wiredDevice && root.wiredDevice.connected)
   readonly property var networks: root.wifiDevice && root.wifiDevice.networks
     ? root.wifiDevice.networks.values.slice().sort((a, b) => b.signalStrength - a.signalStrength)
     : []
@@ -36,6 +48,50 @@ BasePill {
     ? Bluetooth.devices.values.filter(device =>
       device.paired || device.connected || (root.adapter && root.adapter.discovering))
     : []
+  readonly property var connectedBluetoothDevice: root.bluetoothDevices.find(device => device.connected) || null
+  readonly property string brightnessPinKey: root.parentScreen ? root.parentScreen.name : "default"
+  readonly property var brightnessPins: {
+    const saved = SettingsData.brightnessDevicePins || {}
+    const pins = saved[root.brightnessPinKey]
+    return Array.isArray(pins)
+      ? pins.filter(device => SettingsPanelService.brightnessDevices.some(item => item.device === device))
+      : []
+  }
+  readonly property string brightnessSelectedDevice: {
+    const devices = SettingsPanelService.brightnessDevices
+    if (root.selectedBrightnessDevice && devices.some(item => item.device === root.selectedBrightnessDevice))
+      return root.selectedBrightnessDevice
+    if (root.brightnessPins.length > 0)
+      return root.brightnessPins[0]
+    const screen = devices.find(item => item.className === "backlight")
+    return screen ? screen.device : (devices.length > 0 ? devices[0].device : "")
+  }
+  readonly property string brightnessControlDevice: root.brightnessPins.length > 0
+    ? root.brightnessPins[0] : root.brightnessSelectedDevice
+  readonly property var brightnessControlDevices: root.brightnessPins.length > 0
+    ? root.brightnessPins : (root.brightnessControlDevice ? [root.brightnessControlDevice] : [])
+  readonly property real brightnessControlPercent: {
+    const devices = SettingsPanelService.brightnessDevices
+    const values = root.brightnessControlDevices.map(name => {
+      const device = devices.find(item => item.device === name)
+      return device ? root.brightnessSliderValue(device) : null
+    }).filter(value => value !== null)
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0
+  }
+  readonly property var connectedBluetoothDetails: {
+    const device = root.connectedBluetoothDevice
+    if (!device)
+      return []
+    return [
+      ["Device", device.name || device.deviceName || "Bluetooth device", true],
+      ["Address", device.address || "", true],
+      ["Status", BluetoothDeviceState.toString(device.state), false],
+      ["Paired", device.paired ? "Yes" : "No", false],
+      ["Trusted", device.trusted ? "Yes" : "No", false],
+      ["Blocked", device.blocked ? "Yes" : "No", false],
+      ["Battery", device.batteryAvailable ? Math.round(device.battery * 100) + "%" : "", false]
+    ].filter(row => row[1] !== "")
+  }
   readonly property var audioSinks: Pipewire.nodes
     ? Pipewire.nodes.values.filter(node => node.audio && node.isSink && !node.isStream)
     : []
@@ -47,7 +103,131 @@ BasePill {
   readonly property bool audioReady: !!root.activeSink && root.activeSink.ready && !!root.activeSink.audio
   readonly property string connectionName: {
     const connected = root.networks.find(network => network.connected)
-    return connected ? connected.name : (root.wifiDevice && root.wifiDevice.connected ? "Connected" : "Not connected")
+    if (connected)
+      return connected.name
+    if (root.wifiDevice && root.wifiDevice.connected)
+      return "Connected"
+    if (root.wiredDevice && root.wiredDevice.connected)
+      return "Ethernet"
+    return "Not connected"
+  }
+  readonly property var networkDetailRows: {
+    const info = SettingsPanelService.networkInfo || {}
+    if (!info.iface)
+      return []
+    const rows = [
+      ["Interface", info.iface, false],
+      ["IPv4 address", info.ip ? info.ip + (info.prefix ? "/" + info.prefix : "") : "", true],
+      ["Gateway", info.gateway || "", true],
+      ["DNS", info.dns || "", true],
+      ["MAC address", info.mac || "", true]
+    ]
+    if (info.rx_bytes !== undefined && info.rx_bytes !== "" && info.tx_bytes !== undefined && info.tx_bytes !== "") {
+      rows.push(["Receiving", formatNetworkRate(SettingsPanelService.networkDownloadRate), true])
+      rows.push(["Sending", formatNetworkRate(SettingsPanelService.networkUploadRate), true])
+      rows.push(["Downloaded", formatNetworkBytes(info.rx_bytes), true])
+      rows.push(["Uploaded", formatNetworkBytes(info.tx_bytes), true])
+    }
+    if (info.type === "wifi") {
+      rows.push(["Signal", info.signal_dbm ? info.signal_dbm + " dBm" : "", false])
+      rows.push(["Frequency", info.frequency ? info.frequency + " MHz" : "", false])
+      rows.push(["Transmit rate", info.bitrate || "", false])
+    } else {
+      rows.push(["Link speed", formatNetworkLinkSpeed(info.speed), false])
+      rows.push(["Duplex", info.duplex || "", false])
+    }
+    return rows.filter(row => row[1] !== "")
+  }
+
+  function formatNetworkBytes(value) {
+    let bytes = Number(value)
+    if (!isFinite(bytes) || bytes < 0)
+      return "--"
+    const units = ["B", "KB", "MB", "GB", "TB"]
+    let unit = 0
+    while (bytes >= 1024 && unit < units.length - 1) {
+      bytes /= 1024
+      unit++
+    }
+    return bytes.toFixed(unit === 0 ? 0 : 1) + " " + units[unit]
+  }
+
+  function formatNetworkRate(value) {
+    return formatNetworkBytes(value) + "/s"
+  }
+
+  function formatNetworkLinkSpeed(value) {
+    const mbps = Number(value)
+    if (!isFinite(mbps) || mbps <= 0)
+      return ""
+    return mbps >= 1000 ? (mbps / 1000).toFixed(mbps % 1000 === 0 ? 0 : 1) + " Gbit/s"
+      : mbps + " Mbit/s"
+  }
+
+  function isBrightnessPinned(device) {
+    return root.brightnessPins.indexOf(device) !== -1
+  }
+
+  function brightnessControlTitle() {
+    const device = SettingsPanelService.brightnessDevices.find(item => item.device === root.brightnessControlDevice)
+    if (!device)
+      return "Selected device"
+    return device.title
+  }
+
+  function toggleBrightnessPin(device) {
+    const pinsByScreen = JSON.parse(JSON.stringify(SettingsData.brightnessDevicePins || {}))
+    const pins = root.brightnessPins.slice()
+    const index = pins.indexOf(device)
+    if (index >= 0)
+      pins.splice(index, 1)
+    else {
+      pins.push(device)
+      root.selectedBrightnessDevice = device
+    }
+    if (pins.length)
+      pinsByScreen[root.brightnessPinKey] = pins
+    else
+      delete pinsByScreen[root.brightnessPinKey]
+    SettingsData.set("brightnessDevicePins", pinsByScreen)
+  }
+
+  function brightnessExponential(device) {
+    return (SettingsData.brightnessExponentialDevices || []).indexOf(device) !== -1
+  }
+
+  function toggleBrightnessCurve(device) {
+    const devices = (SettingsData.brightnessExponentialDevices || []).slice()
+    const index = devices.indexOf(device)
+    if (index >= 0)
+      devices.splice(index, 1)
+    else
+      devices.push(device)
+    SettingsData.set("brightnessExponentialDevices", devices)
+  }
+
+  function brightnessSliderValue(device) {
+    const percent = Math.max(0, Math.min(100, Number(device.percent) || 0))
+    return root.brightnessExponential(device.device) && device.className !== "leds"
+      ? Math.round(Math.pow(percent / 100, 1 / 2.2) * 100)
+      : percent
+  }
+
+  function setDeviceBrightness(device, sliderPercent) {
+    const curve = root.brightnessExponential(device.device) && device.className !== "leds"
+      ? Math.pow(Math.max(0, Math.min(100, sliderPercent)) / 100, 2.2) * 100
+      : sliderPercent
+    SettingsPanelService.setBrightness(device.device, curve)
+  }
+
+  function setBrightnessTargets(sliderPercent) {
+    const value = Math.max(0, Math.min(100, sliderPercent))
+    for (let i = 0; i < root.brightnessControlDevices.length; i++) {
+      const name = root.brightnessControlDevices[i]
+      const device = SettingsPanelService.brightnessDevices.find(item => item.device === name)
+      if (device)
+        root.setDeviceBrightness(device, value)
+    }
   }
 
   PwObjectTracker {
@@ -234,11 +414,12 @@ BasePill {
           QuickSettingsTile {
             width: (parent.width - parent.spacing * 2) / 3
             height: parent.height
-            iconName: "wifi"
-            title: "Wi-Fi"
+            iconName: root.wifiDevice ? "wifi" : "settings_ethernet"
+            title: root.wifiDevice ? "Wi-Fi" : "Ethernet"
             subtitle: root.connectionName
-            active: Networking.wifiEnabled && root.activeQuickSection === "wifi"
-            available: root.wifiDevice !== null && root.wifiDevice.nmManaged
+            active: root.activeQuickSection === "wifi"
+              && (!root.wifiDevice || Networking.wifiEnabled)
+            available: root.hasNetworkDevice
             onClicked: root.toggleQuickSection("wifi")
           }
 
@@ -248,9 +429,11 @@ BasePill {
             iconName: "bluetooth"
             title: "Bluetooth"
             subtitle: root.adapter && root.adapter.enabled
-              ? (root.bluetoothDevices.find(device => device.connected)
-                ? root.bluetoothDevices.find(device => device.connected).name : "On")
+              ? (root.connectedBluetoothDevice
+                ? (root.connectedBluetoothDevice.name || root.connectedBluetoothDevice.deviceName || root.connectedBluetoothDevice.address)
+                : "On")
               : "Off"
+            sensitiveSubtitle: !!root.connectedBluetoothDevice
             active: !!root.adapter && root.adapter.enabled && root.activeQuickSection === "bluetooth"
             available: root.adapter !== null
             onClicked: root.toggleQuickSection("bluetooth")
@@ -274,7 +457,7 @@ BasePill {
           height: wifiSection.implicitHeight + 18
           radius: Theme.cornerRadius
           color: Theme.withAlpha(Theme.surfaceContainerHigh, 0.45)
-          visible: root.activeQuickSection === "wifi" && !!root.wifiDevice
+          visible: root.activeQuickSection === "wifi" && root.hasNetworkDevice
 
           Column {
             id: wifiSection
@@ -283,6 +466,7 @@ BasePill {
             spacing: 4
 
             QuickSettingsTile {
+              visible: !!root.wifiDevice
               width: parent.width
               height: 48
               iconName: "wifi"
@@ -292,8 +476,87 @@ BasePill {
               onClicked: Networking.wifiEnabled = !Networking.wifiEnabled
             }
 
+            Column {
+              width: parent.width
+              spacing: 3
+              visible: root.hasActiveNetworkDevice
+
+              Text {
+                width: parent.width
+                text: "Connection details"
+                color: Theme.widgetTextColor
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                font.weight: Font.DemiBold
+              }
+
+              Text {
+                visible: root.networkDetailRows.length === 0
+                width: parent.width
+                text: "Interface details unavailable"
+                color: Theme.widgetInactiveIconColor
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall - 1
+              }
+
+              GridLayout {
+                width: parent.width
+                columns: 2
+                columnSpacing: 12
+                rowSpacing: 2
+
+                Repeater {
+                  model: root.networkDetailRows
+                  delegate: RowLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: 4
+
+                    Text {
+                      text: modelData[0]
+                      color: Theme.widgetInactiveIconColor
+                      font.family: Theme.fontFamily
+                      font.pixelSize: Theme.fontSizeSmall - 1
+                      elide: Text.ElideRight
+                    }
+
+                    Item {
+                      id: valueContainer
+                      Layout.fillWidth: true
+                      implicitHeight: detailValue.implicitHeight
+
+                      Text {
+                        id: detailValue
+                        anchors.fill: parent
+                        text: modelData[1]
+                        color: Theme.widgetTextColor
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall - 1
+                        elide: Text.ElideRight
+                        horizontalAlignment: Text.AlignRight
+                        layer.enabled: modelData[2] === true && !revealArea.containsMouse
+                        layer.effect: MultiEffect {
+                          blurEnabled: true
+                          blur: 1.0
+                        }
+                      }
+
+                      MouseArea {
+                        id: revealArea
+                        anchors.fill: parent
+                        visible: modelData[2] === true
+                        acceptedButtons: Qt.NoButton
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
             Item {
-              visible: Networking.wifiEnabled
+              visible: !!root.wifiDevice && Networking.wifiEnabled
               width: parent.width
               height: 24
               Text {
@@ -322,7 +585,7 @@ BasePill {
             }
 
             Text {
-              visible: Networking.wifiEnabled && root.networks.length === 0
+              visible: !!root.wifiDevice && Networking.wifiEnabled && root.networks.length === 0
               width: parent.width
               text: "Looking for networks…"
               color: Theme.widgetInactiveIconColor
@@ -332,7 +595,7 @@ BasePill {
 
             ListView {
               id: wifiNetworkList
-              visible: Networking.wifiEnabled && root.networks.length > 0
+              visible: !!root.wifiDevice && Networking.wifiEnabled && root.networks.length > 0
               width: wifiSection.width
               height: Math.min(contentHeight, 34 * 5 + 4 * 4)
               model: root.networks
@@ -468,7 +731,7 @@ BasePill {
             }
 
             Text {
-              visible: Networking.wifiEnabled && root.connectionError !== ""
+              visible: !!root.wifiDevice && Networking.wifiEnabled && root.connectionError !== ""
               width: parent.width
               text: root.connectionError
               color: Theme.error
@@ -500,6 +763,56 @@ BasePill {
               subtitle: root.adapter && root.adapter.enabled ? "On" : "Off"
               active: !!root.adapter && root.adapter.enabled
               onClicked: if (root.adapter) root.adapter.enabled = !root.adapter.enabled
+            }
+
+            Item {
+              visible: root.adapter && root.adapter.enabled
+              width: parent.width
+              height: 24
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Visible to nearby devices"
+                color: Theme.widgetTextColor
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall - 1
+              }
+
+              Rectangle {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: visibilityLabel.implicitWidth + 18
+                height: 22
+                radius: Theme.pillRadius
+                color: visibilityMouse.containsMouse
+                  ? Theme.withAlpha(Theme.primary, 0.18)
+                  : Theme.withAlpha(root.adapter && root.adapter.discoverable ? Theme.primary : Theme.surfaceContainerHighest, 0.2)
+                border.width: 1
+                border.color: Theme.withAlpha(root.adapter && root.adapter.discoverable ? Theme.primary : Theme.outlineVariant, 0.45)
+
+                Text {
+                  id: visibilityLabel
+                  anchors.centerIn: parent
+                  text: root.adapter && root.adapter.discoverable ? "On" : "Off"
+                  color: root.adapter && root.adapter.discoverable ? Theme.primary : Theme.widgetInactiveIconColor
+                  font.family: Theme.fontFamily
+                  font.pixelSize: Theme.fontSizeSmall - 2
+                }
+
+                MouseArea {
+                  id: visibilityMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    if (!root.adapter)
+                      return
+                    const visible = !root.adapter.discoverable
+                    root.adapter.discoverable = visible
+                    root.adapter.pairable = visible
+                  }
+                }
+              }
             }
 
             Item {
@@ -540,7 +853,129 @@ BasePill {
               font.pixelSize: Theme.fontSizeSmall
             }
 
-            // Pairing request / status card
+            Column {
+              visible: !!root.connectedBluetoothDevice
+              width: parent.width
+              spacing: 4
+
+              Text {
+                width: parent.width
+                text: "Connected device"
+                color: Theme.widgetTextColor
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                font.weight: Font.DemiBold
+              }
+
+              GridLayout {
+                width: parent.width
+                columns: 2
+                columnSpacing: 12
+                rowSpacing: 2
+
+                Repeater {
+                  model: root.connectedBluetoothDetails
+                  delegate: RowLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: 4
+
+                    Text {
+                      text: modelData[0]
+                      color: Theme.widgetInactiveIconColor
+                      font.family: Theme.fontFamily
+                      font.pixelSize: Theme.fontSizeSmall - 1
+                    }
+
+                    Item {
+                      id: bluetoothDetailValue
+                      Layout.fillWidth: true
+                      implicitHeight: bluetoothDetailText.implicitHeight
+
+                      Text {
+                        id: bluetoothDetailText
+                        anchors.fill: parent
+                        text: modelData[1]
+                        color: Theme.widgetTextColor
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall - 1
+                        elide: Text.ElideRight
+                        horizontalAlignment: Text.AlignRight
+                        layer.enabled: modelData[2] === true && !bluetoothDetailHover.containsMouse
+                        layer.effect: MultiEffect {
+                          blurEnabled: true
+                          blur: 1.0
+                        }
+                      }
+
+                      MouseArea {
+                        id: bluetoothDetailHover
+                        anchors.fill: parent
+                        visible: modelData[2] === true
+                        acceptedButtons: Qt.NoButton
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                      }
+                    }
+                  }
+                }
+              }
+
+              Row {
+                width: parent.width
+                spacing: 5
+
+                Repeater {
+                  model: [
+                    { label: root.connectedBluetoothDevice && root.connectedBluetoothDevice.trusted ? "Trusted" : "Trust", action: "trust" },
+                    { label: root.connectedBluetoothDevice && root.connectedBluetoothDevice.blocked ? "Unblock" : "Block", action: "block" },
+                    { label: root.connectedBluetoothDevice && root.connectedBluetoothDevice.wakeAllowed ? "Wake allowed" : "Allow wake", action: "wake" }
+                  ]
+
+                  delegate: Rectangle {
+                    id: deviceCard
+                    required property var modelData
+                    width: actionLabel.implicitWidth + 16
+                    height: 24
+                    radius: Theme.pillRadius
+                    color: actionMouse.containsMouse
+                      ? Theme.withAlpha(Theme.primary, 0.18)
+                      : Theme.withAlpha(Theme.surfaceContainerHighest, 0.55)
+                    border.width: 1
+                    border.color: Theme.withAlpha(Theme.outlineVariant, 0.4)
+
+                    Text {
+                      id: actionLabel
+                      anchors.centerIn: parent
+                      text: modelData.label
+                      color: Theme.widgetTextColor
+                      font.family: Theme.fontFamily
+                      font.pixelSize: Theme.fontSizeSmall - 2
+                    }
+
+                    MouseArea {
+                      id: actionMouse
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: {
+                        const device = root.connectedBluetoothDevice
+                        if (device && modelData.action === "trust") {
+                          device.trusted = !device.trusted
+                        } else if (device && modelData.action === "block") {
+                          device.blocked = !device.blocked
+                        } else if (device && modelData.action === "wake") {
+                          device.wakeAllowed = !device.wakeAllowed
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
+            // Pairing request / status card. The request name and passkey are
+            // transient pairing data, not saved-device details.
             Rectangle {
               id: pairingRequestCard
               visible: root.adapter && root.adapter.enabled && BluetoothService.requestState !== "idle"
@@ -682,14 +1117,35 @@ BasePill {
                     size: 17
                     color: modelData.connected ? Theme.primary : Theme.widgetIconColor
                   }
-                  Text {
+                  Item {
+                    id: bluetoothNameContainer
                     width: parent.width - 118
                     anchors.verticalCenter: parent.verticalCenter
-                    text: modelData.name || modelData.deviceName || modelData.address
-                    color: Theme.widgetTextColor
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    elide: Text.ElideRight
+                    implicitHeight: bluetoothName.implicitHeight
+
+                    Text {
+                      id: bluetoothName
+                      anchors.fill: parent
+                      text: modelData.name || modelData.deviceName || modelData.address
+                      color: Theme.widgetTextColor
+                      font.family: Theme.fontFamily
+                      font.pixelSize: Theme.fontSizeSmall
+                      elide: Text.ElideRight
+                      layer.enabled: (modelData.paired || modelData.connected) && !bluetoothNameHover.containsMouse
+                      layer.effect: MultiEffect {
+                        blurEnabled: true
+                        blur: 1.0
+                      }
+                    }
+
+                    MouseArea {
+                      id: bluetoothNameHover
+                      anchors.fill: parent
+                      visible: modelData.paired || modelData.connected
+                      acceptedButtons: Qt.NoButton
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                    }
                   }
                   Text {
                     anchors.verticalCenter: parent.verticalCenter
@@ -937,6 +1393,7 @@ BasePill {
               spacing: 4
 
               Item {
+                id: brightnessHeader
                 width: parent.width
                 height: 22
                 DmsIcon {
@@ -955,23 +1412,183 @@ BasePill {
                   font.pixelSize: Theme.fontSizeSmall
                   font.weight: Font.DemiBold
                 }
-                Text {
+                DmsIcon {
                   anchors.right: parent.right
                   anchors.verticalCenter: parent.verticalCenter
-                  text: SettingsPanelService.brightnessPercent + "%"
-                  color: Theme.widgetTextColor
-                  font.family: Theme.monoFontFamily
-                  font.pixelSize: Theme.fontSizeSmall
+                  name: root.brightnessDevicesExpanded ? "expand_less" : "expand_more"
+                  size: 17
+                  color: brightnessHeaderMouse.containsMouse ? Theme.primary : Theme.widgetInactiveIconColor
+                }
+                MouseArea {
+                  id: brightnessHeaderMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.brightnessDevicesExpanded = !root.brightnessDevicesExpanded
                 }
               }
 
+              Text {
+                width: parent.width
+                text: root.brightnessPins.length > 1
+                  ? "Pinned devices · " + root.brightnessPins.length
+                  : root.brightnessControlTitle()
+                color: Theme.widgetInactiveIconColor
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall - 1
+                elide: Text.ElideRight
+              }
               Slider {
                 width: parent.width
                 height: 26
                 from: 0
                 to: 100
-                value: SettingsPanelService.brightnessPercent
-                onMoved: SettingsPanelService.setBrightness(value)
+                value: root.brightnessControlPercent
+                onMoved: root.setBrightnessTargets(value)
+              }
+
+              Column {
+                id: brightnessDeviceList
+                visible: root.brightnessDevicesExpanded
+                width: parent.width
+                spacing: 4
+
+                Repeater {
+                  model: SettingsPanelService.brightnessDevices
+
+                  delegate: Rectangle {
+                    id: deviceCard
+                    required property var modelData
+                    readonly property bool selected: root.brightnessSelectedDevice === modelData.device
+                    property bool exponential: root.brightnessExponential(modelData.device)
+                    width: brightnessDeviceList.width
+                    implicitHeight: deviceCardContent.implicitHeight + 12
+                    radius: Theme.cornerRadius
+                    color: selected
+                      ? Theme.withAlpha(Theme.primary, 0.1)
+                      : Theme.withAlpha(Theme.surfaceContainerHighest, 0.38)
+                    border.width: selected ? 2 : 1
+                    border.color: selected ? Theme.primary : Theme.withAlpha(Theme.outlineVariant, 0.35)
+
+                    MouseArea {
+                      anchors.fill: parent
+                      onClicked: root.selectedBrightnessDevice = modelData.device
+                    }
+
+                    Column {
+                      id: deviceCardContent
+                      anchors.fill: parent
+                      anchors.margins: 6
+                      spacing: 3
+
+                      Row {
+                        width: parent.width
+                        height: 28
+                        spacing: 6
+
+                        DmsIcon {
+                          anchors.verticalCenter: parent.verticalCenter
+                          name: modelData.className === "leds" ? "keyboard" : "brightness_medium"
+                          size: 19
+                          color: deviceCard.selected ? Theme.primary : Theme.widgetIconColor
+                        }
+
+                        Column {
+                          anchors.verticalCenter: parent.verticalCenter
+                          width: parent.width - 80
+                          spacing: 1
+
+                          Text {
+                            width: parent.width
+                            text: modelData.className === "backlight"
+                              ? "Backlight: " + modelData.title
+                              : modelData.title
+                            color: Theme.widgetTextColor
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall
+                            font.weight: Font.DemiBold
+                            elide: Text.ElideRight
+                          }
+
+                          Text {
+                            width: parent.width
+                            text: modelData.device + " · " + modelData.classLabel
+                            color: Theme.widgetInactiveIconColor
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall - 2
+                            elide: Text.ElideRight
+                          }
+                        }
+
+                        Text {
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: modelData.percent + "%"
+                          color: Theme.widgetTextColor
+                          font.family: Theme.monoFontFamily
+                          font.pixelSize: Theme.fontSizeSmall - 1
+                        }
+
+                        Item {
+                          width: 26
+                          height: 26
+
+                          DmsIcon {
+                            anchors.centerIn: parent
+                            name: "push_pin"
+                            size: 16
+                            color: root.isBrightnessPinned(modelData.device) ? Theme.primary : Theme.widgetInactiveIconColor
+                          }
+
+                          MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.toggleBrightnessPin(modelData.device)
+                          }
+                        }
+                      }
+
+                      Slider {
+                        width: parent.width
+                        height: 26
+                        from: 0
+                        to: 100
+                        value: root.brightnessSliderValue(modelData)
+                        onMoved: root.setDeviceBrightness(modelData, value)
+                      }
+
+                      Item {
+                        visible: modelData.className !== "leds"
+                        width: parent.width
+                        height: 22
+
+                        Rectangle {
+                          anchors.fill: parent
+                          radius: Theme.hoverRadius
+                          color: curveMouse.containsMouse
+                            ? Theme.withAlpha(Theme.primary, 0.16)
+                            : Theme.withAlpha(Theme.surfaceContainerHighest, 0.55)
+
+                          Text {
+                            anchors.centerIn: parent
+                            text: deviceCard.exponential ? "Exponential" : "Linear"
+                            color: Theme.widgetTextColor
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall - 2
+                          }
+
+                          MouseArea {
+                            id: curveMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.toggleBrightnessCurve(modelData.device)
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }

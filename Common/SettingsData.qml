@@ -66,11 +66,14 @@ Singleton {
   property var barCenterWidgets: Util.cloneDef(Spec.SPEC["barCenterWidgets"].def)
   property var barRightWidgets: Util.cloneDef(Spec.SPEC["barRightWidgets"].def)
   property int barTransparency: 0
+  property bool barBlurEnabled: false
   property real barWidgetTransparency: 0.65
   property int barSpacing: 0
   property int barInnerPadding: -2
   property int barPosition: 1
   property var hiddenTrayIds: Util.cloneDef(Spec.SPEC["hiddenTrayIds"].def)
+  property var brightnessDevicePins: Util.cloneDef(Spec.SPEC["brightnessDevicePins"].def)
+  property var brightnessExponentialDevices: Util.cloneDef(Spec.SPEC["brightnessExponentialDevices"].def)
 
   // ---- helper accessors ---------------------------------------------------
   function isBarWidgetEnabled(list, id) {

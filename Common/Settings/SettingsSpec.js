@@ -81,9 +81,12 @@ var SPEC = {
         ]
     },
     barTransparency: { def: 0 },
+    barBlurEnabled: { def: false },
     barWidgetTransparency: { def: 0.65, coerce: percentToUnit },
     barSpacing: { def: 0 },
     barInnerPadding: { def: -2 },
     barPosition: { def: 1 },
-    hiddenTrayIds: { def: [] }
+    hiddenTrayIds: { def: [] },
+    brightnessDevicePins: { def: {} },
+    brightnessExponentialDevices: { def: [] }
 };

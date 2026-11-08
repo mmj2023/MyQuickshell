@@ -25,7 +25,8 @@ reimplementing Vim motions in QML. The QML command prompt is a visible input
 surface because headless Neovim does not render its own command line. The
 prompt forwards command-line keystrokes to Neovim, preserving its built-in
 completion, editing keys, and command history; completion candidates appear in
-a themed menu in the Notes overlay. Vim macros are handled by Neovim; while a
+a themed menu in the Notes overlay. Neovim's `showcmd` messages display pending
+key sequences in the Notes status bar. Vim macros are handled by Neovim; while a
 macro is recording, the status bar displays its register. The
 Notes-specific `:w` and `:q` actions are handled through NotesService to save
 or close the current note buffer; `:q` does not close the overlay. Character,
@@ -71,6 +72,13 @@ relative (`:set nu relativenumber`).
   supporting `wlr-layer-shell`.
 - **Hyprland integration:** `hyprctl` is used for workspace state and related
   compositor actions; those widgets are unavailable outside Hyprland.
+- **Bar backdrop blur (optional):** The bar's Blur option marks the bar surface
+  as a blur region through Quickshell's Wayland background-effect support. The
+  compositor must support `ext-background-effect-v1`; when supported, the
+  compositor blurs only the desktop behind the bar, leaving bar content sharp.
+  The option starts off and does not change the compositor's global blur
+  setting. On compositors without this protocol, the option has no visual
+  effect.
 - **Workspace overview (optional):** the [ScrollOverview Hyprland
   plugin](https://github.com/yayuuu/hyprland-scroll-overview) provides the live
   overview opened by right-clicking the workspace pill background. Numbered
@@ -87,6 +95,18 @@ relative (`:set nu relativenumber`).
   that daemon. Battery and connected-device information remain available if
   the relevant tool is missing; the overview reports when profile control is
   unavailable.
+- **Brightness controls (optional):** `brightnessctl` enumerates and adjusts
+  detected screen backlights and keyboard backlights in Quick Settings.
+  Devices are shown as separate cards with type/current level, individual
+  sliders, and a per-screen pin; the shared slider controls the pinned devices.
+  Screen backlights also support an optional exponential slider curve.
+  Brightness controls are omitted when the tool is unavailable or no supported
+  backlight devices are detected.
+- **Network interface details (optional):** `iproute2` supplies the active
+  route and interface address/counters shown in Quick Settings; `iw` adds
+  Wi-Fi signal, frequency, and transmit-rate details. If either tool is
+  unavailable, Wi-Fi scanning and NetworkManager controls still work, while
+  the affected live detail fields are omitted.
 - **Neovim Notes backend (optional dependencies):**
   - `nvim` (Neovim executable) runs as a headless embedded child process.
   - Python 3 runs the repository's `Services/NotesNvimBridge.py` adapter.

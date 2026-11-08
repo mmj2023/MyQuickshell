@@ -2,6 +2,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 
 // Compositor-agnostic workspace state.
 //
@@ -34,6 +35,86 @@ QtObject {
   function activeWorkspaceId(monitorName) {
     var v = activeByMonitor[monitorName]
     return v === undefined ? 0 : v
+  }
+
+  readonly property var specialWorkspaceNames: {
+    if (root.backend !== "hyprland")
+      return []
+    const names = ["special"]
+    for (const workspace of Hyprland.workspaces?.values || []) {
+      const workspaceName = String(workspace.name || "")
+      if (!workspaceName.startsWith("special:"))
+        continue
+      const name = workspaceName.slice("special:".length) || "special"
+      if (names.indexOf(name) === -1)
+        names.push(name)
+    }
+    return names
+  }
+
+  function hyprlandToplevelFor(window) {
+    if (!window)
+      return null
+    for (const toplevel of Hyprland.toplevels?.values || []) {
+      if (toplevel.wayland === window)
+        return toplevel
+    }
+    return null
+  }
+
+  function windowScratchpadName(window) {
+    const toplevel = root.hyprlandToplevelFor(window)
+    const workspaceName = String(toplevel?.workspace?.name || "")
+    if (workspaceName === "special")
+      return "special"
+    return workspaceName.startsWith("special:")
+      ? workspaceName.slice("special:".length) || "special"
+      : ""
+  }
+
+  function moveWindowToScratchpad(window, name) {
+    const toplevel = root.hyprlandToplevelFor(window)
+    if (root.backend !== "hyprland" || !toplevel?.address)
+      return false
+    const workspace = name === "special" ? "special" : "special:" + String(name)
+    const address = String(toplevel.address)
+    const selector = "address:" + (address.startsWith("0x") ? address : "0x" + address)
+    Hyprland.dispatch(
+      "hl.dsp.window.move({ workspace = " + root.luaString(workspace)
+      + ", window = " + root.luaString(selector) + ", follow = false })"
+    )
+    return true
+  }
+
+  function moveWindowOutOfScratchpad(window) {
+    const toplevel = root.hyprlandToplevelFor(window)
+    if (root.backend !== "hyprland" || !toplevel?.address)
+      return false
+    const workspace = toplevel.monitor?.activeWorkspace
+    const target = workspace?.name || workspace?.id || "+0"
+    const address = String(toplevel.address)
+    const selector = "address:" + (address.startsWith("0x") ? address : "0x" + address)
+    Hyprland.dispatch(
+      "hl.dsp.window.move({ workspace = " + root.luaValue(target)
+      + ", window = " + root.luaString(selector) + ", follow = true })"
+    )
+    return true
+  }
+
+  function closeWindow(window) {
+    if (!window || typeof window.close !== "function")
+      return false
+    window.close()
+    return true
+  }
+
+  function luaString(value) {
+    return "\"" + String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\""
+  }
+
+  function luaValue(value) {
+    const text = String(value)
+    return /^\d+$/.test(text) ? text : root.luaString(text)
   }
 
   function refreshAll() {

@@ -2,19 +2,26 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Common
 
 QtObject {
   id: root
 
-  property bool brightnessAvailable: false
-  property int brightnessPercent: 0
-  property string brightnessDevice: ""
-  property int pendingBrightnessPercent: 0
-  property bool hasPendingBrightness: false
+  property var brightnessDevices: []
+  readonly property bool brightnessAvailable: brightnessDevices.length > 0
+  property var brightnessWriteQueue: []
+  property string writingBrightnessDevice: ""
   property bool keepAwake: false
   property bool networkManagerAvailable: false
   property string activeConnectionUuid: ""
   property string dnsProvider: "DHCP"
+  property var networkInfo: ({})
+  property real networkDownloadRate: 0
+  property real networkUploadRate: 0
+  property real previousNetworkRxBytes: 0
+  property real previousNetworkTxBytes: 0
+  property real previousNetworkSampleTime: 0
+  property string previousNetworkInterface: ""
   property var vpnProfiles: []
   property var activeVpnUuids: []
   property bool networkBusy: false
@@ -35,38 +42,62 @@ QtObject {
       profilesProc.running = true
     if (!activeProc.running)
       activeProc.running = true
+    if (!networkDetailsProc.running)
+      networkDetailsProc.running = true
     if (root.nightModeAvailable && !nightStatusProc.running)
       nightStatusProc.running = true
   }
 
   function updateBrightness(raw) {
     const lines = String(raw || "").trim().split("\n")
-    let selected = null
+    const devices = []
     for (let i = 0; i < lines.length; i++) {
       const fields = lines[i].split(",")
-      if (fields.length < 4 || fields[1] === "leds")
+      if (fields.length < 5)
         continue
       const percent = Number(String(fields[3]).replace("%", ""))
       if (!isFinite(percent))
         continue
-      const candidate = { device: fields[0], className: fields[1], percent: Math.round(percent) }
-      if (!selected || (candidate.className === "backlight" && selected.className !== "backlight"))
-        selected = candidate
+      const device = fields[0]
+      const className = fields[1]
+      const isScreenBacklight = className === "backlight"
+      const isKeyboardBacklight = className === "leds" && /(kbd|keyboard).*backlight|backlight.*(kbd|keyboard)/i.test(device)
+      if (!isScreenBacklight && !isKeyboardBacklight)
+        continue
+      const prettyDevice = device
+        .replace(/^asus::kbd_backlight$/i, "ASUS Keyboard Backlight")
+        .replace(/::/g, " ")
+        .replace(/[_-]+/g, " ")
+        .replace(/\b\w/g, character => character.toUpperCase())
+      devices.push({
+        device: device,
+        title: isKeyboardBacklight ? "Keyboard Backlight" : prettyDevice,
+        classLabel: isKeyboardBacklight ? "LED device" : "Backlight device",
+        className: className,
+        percent: Math.round(percent),
+        current: Number(fields[2]),
+        max: Number(fields[4])
+      })
     }
-    root.brightnessAvailable = selected !== null
-    if (selected) {
-      root.brightnessDevice = selected.device
-      root.brightnessPercent = selected.percent
-    } else {
-      root.brightnessDevice = ""
-    }
+    devices.sort((left, right) => {
+      if (left.className === right.className)
+        return left.title.localeCompare(right.title)
+      return left.className === "backlight" ? -1 : 1
+    })
+    root.brightnessDevices = devices
   }
 
-  function setBrightness(percent) {
-    if (!root.brightnessAvailable)
+  function setBrightness(device, percent) {
+    if (!device || !root.brightnessDevices.some(item => item.device === device))
       return
-    root.pendingBrightnessPercent = Math.max(0, Math.min(100, Math.round(percent)))
-    root.hasPendingBrightness = true
+    const queue = root.brightnessWriteQueue.slice()
+    const value = Math.max(0, Math.min(100, Math.round(percent)))
+    const index = queue.findIndex(item => item.device === device)
+    if (index >= 0)
+      queue[index] = { device: device, percent: value }
+    else
+      queue.push({ device: device, percent: value })
+    root.brightnessWriteQueue = queue
     brightnessWriteTimer.restart()
   }
 
@@ -147,6 +178,38 @@ QtObject {
     } else {
       root.dnsProvider = "Custom"
     }
+  }
+
+  function updateNetworkDetails(raw) {
+    const lines = String(raw || "").split("\n")
+    const details = {}
+    for (let i = 0; i < lines.length; i++) {
+      const separator = lines[i].indexOf("\t")
+      if (separator <= 0)
+        continue
+      details[lines[i].slice(0, separator)] = lines[i].slice(separator + 1).trim()
+    }
+
+    const rxBytes = Number(details.rx_bytes || 0)
+    const txBytes = Number(details.tx_bytes || 0)
+    const now = Date.now() / 1000
+    if (!details.iface || details.iface !== root.previousNetworkInterface
+        || root.previousNetworkSampleTime === 0) {
+      root.networkDownloadRate = 0
+      root.networkUploadRate = 0
+    } else {
+      const elapsed = now - root.previousNetworkSampleTime
+      if (elapsed > 0) {
+        root.networkDownloadRate = Math.max(0, (rxBytes - root.previousNetworkRxBytes) / elapsed)
+        root.networkUploadRate = Math.max(0, (txBytes - root.previousNetworkTxBytes) / elapsed)
+      }
+    }
+
+    root.previousNetworkInterface = details.iface || ""
+    root.previousNetworkSampleTime = details.iface ? now : 0
+    root.previousNetworkRxBytes = rxBytes
+    root.previousNetworkTxBytes = txBytes
+    root.networkInfo = details
   }
 
   function setDnsProvider(provider) {
@@ -241,14 +304,14 @@ QtObject {
 
   property Process brightnessProc: Process {
     id: brightnessProc
-    command: ["brightnessctl", "-m"]
+    command: ["brightnessctl", "-l", "-m"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.updateBrightness(text)
     }
     onExited: function(exitCode) {
       if (exitCode !== 0)
-        root.brightnessAvailable = false
+        root.brightnessDevices = []
     }
   }
 
@@ -256,10 +319,14 @@ QtObject {
     id: brightnessWriteProc
     command: ["brightnessctl", "set", "50%"]
     onExited: function(exitCode) {
-      if (exitCode === 0 && !brightnessProc.running)
+      if (exitCode !== 0) {
+        root.errorMessage = "Brightness change failed for " + root.writingBrightnessDevice + ". Check device permissions."
+      }
+      root.writingBrightnessDevice = ""
+      if (root.brightnessWriteQueue.length > 0)
+        brightnessWriteTimer.restart()
+      else if (exitCode === 0 && !brightnessProc.running)
         brightnessProc.running = true
-      else if (exitCode !== 0)
-        root.errorMessage = "Brightness change failed. Check brightness device permissions."
     }
   }
 
@@ -271,11 +338,14 @@ QtObject {
         restart()
         return
       }
-      if (!root.hasPendingBrightness)
+      if (root.brightnessWriteQueue.length === 0)
         return
-      root.hasPendingBrightness = false
+      const queue = root.brightnessWriteQueue.slice()
+      const next = queue.shift()
+      root.brightnessWriteQueue = queue
+      root.writingBrightnessDevice = next.device
       brightnessWriteProc.command = [
-        "brightnessctl", "-d", root.brightnessDevice, "set", root.pendingBrightnessPercent + "%"
+        "brightnessctl", "-d", next.device, "set", next.percent + "%"
       ]
       brightnessWriteProc.running = true
     }
@@ -314,6 +384,41 @@ QtObject {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.updateDnsConfig(text)
+    }
+  }
+
+  property Process networkDetailsProc: Process {
+    id: networkDetailsProc
+    command: ["sh", "-c",
+      "route=$(ip route get 1.1.1.1 2>/dev/null || true)\n" +
+      "iface=$(printf '%s\\n' \"$route\" | awk '{ for (i = 1; i <= NF; i++) if ($i == \"dev\") { print $(i + 1); exit } }')\n" +
+      "[ -n \"$iface\" ] || exit 0\n" +
+      "printf 'iface\\t%s\\n' \"$iface\"\n" +
+      "printf '%s\\n' \"$route\" | awk '{ for (i = 1; i <= NF; i++) if ($i == \"src\") { print \"ip\\t\" $(i + 1); exit } }'\n" +
+      "printf '%s\\n' \"$route\" | awk '{ for (i = 1; i <= NF; i++) if ($i == \"via\") { print \"gateway\\t\" $(i + 1); exit } }'\n" +
+      "ip -o -4 addr show dev \"$iface\" scope global 2>/dev/null | awk 'NR == 1 { split($4, address, \"/\"); print \"ip\\t\" address[1]; print \"prefix\\t\" address[2] }'\n" +
+      "printf 'mac\\t%s\\n' \"$(cat \"/sys/class/net/$iface/address\" 2>/dev/null || true)\"\n" +
+      "printf 'rx_bytes\\t%s\\n' \"$(cat \"/sys/class/net/$iface/statistics/rx_bytes\" 2>/dev/null || true)\"\n" +
+      "printf 'tx_bytes\\t%s\\n' \"$(cat \"/sys/class/net/$iface/statistics/tx_bytes\" 2>/dev/null || true)\"\n" +
+      "printf 'dns\\t%s\\n' \"$(nmcli -g IP4.DNS device show \"$iface\" 2>/dev/null | paste -sd ', ' -)\"\n" +
+      "if [ -d \"/sys/class/net/$iface/wireless\" ]; then\n" +
+      "  printf 'type\\twifi\\n'\n" +
+      "  if command -v iw >/dev/null 2>&1; then\n" +
+      "    iw dev \"$iface\" link 2>/dev/null | awk '/signal:/ { print \"signal_dbm\\t\" $2; next } /freq:/ { print \"frequency\\t\" $2; next } /tx bitrate:/ { print \"bitrate\\t\" $3 \" \" $4; exit }'\n" +
+      "  fi\n" +
+      "else\n" +
+      "  printf 'type\\tethernet\\n'\n" +
+      "  printf 'speed\\t%s\\n' \"$(cat \"/sys/class/net/$iface/speed\" 2>/dev/null || true)\"\n" +
+      "  printf 'duplex\\t%s\\n' \"$(cat \"/sys/class/net/$iface/duplex\" 2>/dev/null || true)\"\n" +
+      "fi\n"
+    ]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.updateNetworkDetails(text)
+    }
+    onExited: function(exitCode) {
+      if (exitCode !== 0)
+        root.updateNetworkDetails("")
     }
   }
 

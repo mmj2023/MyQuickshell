@@ -79,6 +79,21 @@ default control style does not match the shell theme. For every such control:
 - Keep UI widgets declarative and put compositor/system integration in
   `Services/`.
 
+## GitHub tooling
+
+- A GitHub MCP server is configured (`tools.github.*` in OpenCode Code Mode).
+  Use it for anything about remote repository state, instead of
+  approximating with the GitHub website or plain `git`: issues, pull requests,
+  releases and tags, code search across GitHub, file contents on a branch or
+  PR, commit/PR history, labels, and for creating branches, commits, PRs,
+  review comments, or requesting Copilot reviews.
+- Keep plain `git` for local operations (status, diff, staging, local
+  branching) and for pushing/pulling; use the API-shaped tools for
+  GitHub-hosted resources that git cannot reach.
+- Copilot CLI users in this repo additionally rely on its builtin github
+  tooling; keep the two from colliding: do not push branches or open PRs with
+  both tools for the same change.
+
 ## Notes editor backend authority
 
 - When the optional headless Neovim backend is available, it is the sole source

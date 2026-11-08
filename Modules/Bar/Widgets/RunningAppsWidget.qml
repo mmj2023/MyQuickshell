@@ -23,7 +23,7 @@ BasePill {
   property bool previewFromHiddenAppsMenu: false
   property int previewPopupX: 0
   property int previewPopupY: 0
-  property bool appPreviewOpen: false
+  property bool appContextMenuOpen: false
   property bool appTooltipHovered: false
   property string appTooltipText: ""
   property int appTooltipX: 0
@@ -119,12 +119,12 @@ BasePill {
     root.overflowOpen = !root.overflowOpen
   }
 
-  function toggleAppPreview(icon, window, fromHiddenAppsMenu) {
+  function toggleAppContextMenu(icon, window, fromHiddenAppsMenu) {
     if (!root.barWindow || !window)
       return
 
-    if (root.appPreviewOpen && root.previewAppWindow === window) {
-      root.appPreviewOpen = false
+    if (root.appContextMenuOpen && root.previewAppWindow === window) {
+      root.appContextMenuOpen = false
       return
     }
 
@@ -133,19 +133,27 @@ BasePill {
     root.previewFromHiddenAppsMenu = fromHiddenAppsMenu
     const screenWidth = root.parentScreen ? root.parentScreen.width : root.barWindow.width
     if (fromHiddenAppsMenu) {
-      root.previewPopupX = Math.round(
-        (runningAppsPopup.width - appPreviewPopup.implicitWidth) / 2
+      const point = icon.mapToItem(
+        runningAppsPopup.contentItem,
+        icon.width / 2,
+        icon.height
       )
-      root.previewPopupY = Math.round(runningAppsPopup.height + Theme.spaceXS)
+      const desiredX = root.popupX + point.x - appContextPopup.implicitWidth / 2
+      const clampedX = Math.max(Theme.spaceS, Math.min(
+        screenWidth - appContextPopup.implicitWidth - Theme.spaceS,
+        desiredX
+      ))
+      root.previewPopupX = clampedX - root.popupX
+      root.previewPopupY = runningAppsPopup.height + Theme.spaceXS
     } else {
       const point = icon.mapToItem(root.barWindow.contentItem, icon.width / 2, icon.height)
-      root.previewPopupX = Math.max(8, Math.min(
-        screenWidth - appPreviewPopup.implicitWidth - 8,
-        point.x - appPreviewPopup.implicitWidth / 2
+      root.previewPopupX = Math.max(Theme.spaceS, Math.min(
+        screenWidth - appContextPopup.implicitWidth - Theme.spaceS,
+        point.x - appContextPopup.implicitWidth / 2
       ))
       root.previewPopupY = Math.round(point.y + Theme.spaceXS)
     }
-    root.appPreviewOpen = true
+    root.appContextMenuOpen = true
   }
 
   function showAppTooltip(icon, title) {
@@ -207,7 +215,7 @@ BasePill {
             onClicked: function(mouse) {
               if (mouse.button === Qt.RightButton) {
                 root.hideAppTooltip()
-                root.toggleAppPreview(parent, win)
+                root.toggleAppContextMenu(parent, win, false)
                 return
               }
               win.activate()
@@ -339,7 +347,7 @@ BasePill {
               onClicked: function(mouse) {
                 if (mouse.button === Qt.RightButton) {
                   root.hideAppTooltip()
-                  root.toggleAppPreview(parent, win, true)
+                  root.toggleAppContextMenu(parent, win, true)
                   return
                 }
                 root.overflowOpen = false
@@ -354,20 +362,20 @@ BasePill {
   }
 
   PopupWindow {
-    id: appPreviewPopup
+    id: appContextPopup
     anchor.window: root.previewFromHiddenAppsMenu ? runningAppsPopup : root.barWindow
     anchor.rect.x: root.previewPopupX
     anchor.rect.y: root.previewPopupY
-    visible: root.appPreviewOpen
+    visible: root.appContextMenuOpen
     grabFocus: true
     color: "transparent"
     surfaceFormat.opaque: false
-    implicitWidth: 420
-    implicitHeight: 286
+    implicitWidth: 320
+    implicitHeight: appContextContent.implicitHeight + Theme.spaceS * 2
 
     onVisibleChanged: {
       if (!visible)
-        root.appPreviewOpen = false
+        root.appContextMenuOpen = false
     }
 
     Rectangle {
@@ -381,42 +389,220 @@ BasePill {
       border.color: Theme.withAlpha(Theme.outline, 0.35)
 
       Column {
+        id: appContextContent
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 8
+        anchors.margins: Theme.spaceS
+        spacing: Theme.spaceXS
 
-        Text {
+        Item {
           width: parent.width
-          height: 20
-          text: root.previewAppTitle
-          color: Theme.widgetTextColor
-          font.pixelSize: 14
-          font.weight: Font.DemiBold
-          elide: Text.ElideRight
-          verticalAlignment: Text.AlignVCenter
+          height: Theme.spaceXL
+          implicitHeight: Theme.spaceXL
+
+          Row {
+            anchors.fill: parent
+            spacing: Theme.spaceS
+
+            IconImage {
+              width: Theme.spaceL
+              height: Theme.spaceL
+              anchors.verticalCenter: parent.verticalCenter
+              source: Theme.getAppIcon(root.previewAppWindow ? root.previewAppWindow.appId : "")
+              asynchronous: true
+            }
+
+            Text {
+              width: parent.width - Theme.spaceL - Theme.spaceS
+              height: parent.height
+              text: root.previewAppTitle
+              color: Theme.surfaceText
+              font.family: Theme.fontFamily
+              font.pixelSize: Theme.fontSizeSmall
+              font.weight: Font.DemiBold
+              elide: Text.ElideRight
+              verticalAlignment: Text.AlignVCenter
+            }
+          }
         }
 
         Rectangle {
           width: parent.width
-          height: 218
+          height: 148
+          implicitHeight: height
           radius: Theme.cornerRadius
           color: Theme.withAlpha(Theme.surfaceContainer, 0.82)
           clip: true
 
           ScreencopyView {
+            id: appPreviewCapture
             anchors.fill: parent
             captureSource: root.previewAppWindow
-            live: root.appPreviewOpen
+            live: root.appContextMenuOpen
             constraintSize.width: parent.width
             constraintSize.height: parent.height
           }
 
           Text {
             anchors.centerIn: parent
-            visible: !root.previewAppWindow
+            visible: !appPreviewCapture.hasContent
             text: qsTr("Preview unavailable")
-            color: Theme.widgetInactiveIconColor
-            font.pixelSize: 13
+            color: Theme.surfaceText
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+          }
+        }
+
+        Rectangle {
+          width: parent.width
+          height: 1
+          implicitHeight: height
+          color: Theme.withAlpha(Theme.outlineVariant, 0.6)
+        }
+
+        Item {
+          visible: WorkspacesService.windowScratchpadName(root.previewAppWindow) !== ""
+          width: parent.width
+          height: Theme.spaceXL + Theme.spaceS
+          implicitHeight: height
+
+          Rectangle {
+            anchors.fill: parent
+            radius: Theme.hoverRadius
+            color: moveOutMouse.containsMouse ? Theme.withAlpha(Theme.primary, 0.12) : "transparent"
+          }
+
+          DmsIcon {
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.spaceS
+            anchors.verticalCenter: parent.verticalCenter
+            name: "outbox"
+            size: Theme.iconSizeSmall
+            color: Theme.surfaceText
+          }
+
+          Text {
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.spaceXL + Theme.spaceS
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("Move out of scratchpad")
+            color: Theme.surfaceText
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+          }
+
+          MouseArea {
+            id: moveOutMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+              const window = root.previewAppWindow
+              root.appContextMenuOpen = false
+              WorkspacesService.moveWindowOutOfScratchpad(window)
+            }
+          }
+        }
+
+        Repeater {
+          model: WorkspacesService.windowScratchpadName(root.previewAppWindow) === ""
+            ? WorkspacesService.specialWorkspaceNames
+            : []
+
+          delegate: Item {
+            required property string modelData
+            width: appContextContent.width
+            height: Theme.spaceXL + Theme.spaceS
+            implicitHeight: height
+
+            Rectangle {
+              anchors.fill: parent
+              radius: Theme.hoverRadius
+              color: scratchpadMouse.containsMouse ? Theme.withAlpha(Theme.primary, 0.12) : "transparent"
+            }
+
+            DmsIcon {
+              anchors.left: parent.left
+              anchors.leftMargin: Theme.spaceS
+              anchors.verticalCenter: parent.verticalCenter
+              name: "inbox"
+              size: Theme.iconSizeSmall
+              color: Theme.surfaceText
+            }
+
+            Text {
+              anchors.left: parent.left
+              anchors.leftMargin: Theme.spaceXL + Theme.spaceS
+              anchors.verticalCenter: parent.verticalCenter
+              text: modelData === "special"
+                ? qsTr("Move to scratchpad")
+                : qsTr("Move to scratchpad: %1").arg(modelData)
+              color: Theme.surfaceText
+              font.family: Theme.fontFamily
+              font.pixelSize: Theme.fontSizeSmall
+            }
+
+            MouseArea {
+              id: scratchpadMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: {
+                const window = root.previewAppWindow
+                const name = modelData
+                root.appContextMenuOpen = false
+                WorkspacesService.moveWindowToScratchpad(window, name)
+              }
+            }
+          }
+        }
+
+        Rectangle {
+          width: parent.width
+          height: 1
+          implicitHeight: height
+          color: Theme.withAlpha(Theme.outlineVariant, 0.6)
+        }
+
+        Item {
+          width: parent.width
+          height: Theme.spaceXL + Theme.spaceS
+          implicitHeight: height
+
+          Rectangle {
+            anchors.fill: parent
+            radius: Theme.hoverRadius
+            color: closeWindowMouse.containsMouse ? Theme.withAlpha(Theme.error, 0.12) : "transparent"
+          }
+
+          DmsIcon {
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.spaceS
+            anchors.verticalCenter: parent.verticalCenter
+            name: "close"
+            size: Theme.iconSizeSmall
+            color: Theme.error
+          }
+
+          Text {
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.spaceXL + Theme.spaceS
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("Close")
+            color: Theme.error
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+          }
+
+          MouseArea {
+            id: closeWindowMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+              const window = root.previewAppWindow
+              root.appContextMenuOpen = false
+              WorkspacesService.closeWindow(window)
+            }
           }
         }
       }
