@@ -50,6 +50,15 @@ relative (`:set nu relativenumber`).
 > bar degrades gracefully on other compositors, simply hiding that widget.
 > On Hyprland, right-click an inactive workspace to view live previews of its
 > open windows using Quickshell's native Wayland screencopy support.
+> Alt+Tab selects the next current-workspace window; releasing Alt commits the
+> selection. If Alt is still held after 150 ms, the live-preview switcher
+> appears, even if Tab has been released. Ctrl latches the overlay open; a
+> release of the Alt used to open it keeps it open. Re-pressing and releasing
+> Alt, Esc, or clicking commits the selected window and closes the overlay.
+> While latched, Tab/Shift+Tab advances the preview selection without closing
+> the overlay. Use Alt+Shift+Tab or
+> Alt+grave to cycle backward. On startup, MyQuickshell
+> replaces Hyprshell's matching Alt+Tab bindings so the switchers do not compete.
 > Right-clicking the workspace pill outside its numbered buttons opens the
 > optional ScrollOverview live workspace overview.
 > When CPU and memory widgets are both enabled, click each metric in the
@@ -71,7 +80,10 @@ relative (`:set nu relativenumber`).
 - **Required:** Quickshell 0.3.1 or newer with Qt 6, and a Wayland compositor
   supporting `wlr-layer-shell`.
 - **Hyprland integration:** `hyprctl` is used for workspace state and related
-  compositor actions; those widgets are unavailable outside Hyprland.
+  compositor actions; those widgets are unavailable outside Hyprland. The
+  Alt+Tab switcher uses Hyprland's dynamic Lua binding API and Quickshell's
+  native Wayland screencopy support; it requires no additional runtime
+  dependency.
 - **Bar backdrop blur (optional):** The bar's Blur option marks the bar surface
   as a blur region through Quickshell's Wayland background-effect support. The
   compositor must support `ext-background-effect-v1`; when supported, the

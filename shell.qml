@@ -12,4 +12,5 @@ ShellRoot {
   id: shell
 
   Bar { id: bar }
+  WindowSwitcher { }
 }
