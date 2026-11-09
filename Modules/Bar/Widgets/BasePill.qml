@@ -15,6 +15,7 @@ Item {
   property real barThickness: Theme.barThickness
   property real barSpacing: 0
   property bool vertical: false
+  property color backgroundTint: "transparent"
   property alias content: contentLoader.sourceComponent
 
   signal clicked
@@ -58,7 +59,11 @@ Item {
         const isHovered = root.isMouseHovered
         const transparency = isHovered ? Math.max(0.3, raw) : raw
         const base = isHovered ? Theme.widgetBaseHoverColor : Theme.widgetBaseBackgroundColor
-        return Theme.withAlpha(base, transparency)
+        const tintAmount = root.backgroundTint.a
+        const tintedBase = tintAmount > 0
+          ? Theme.blend(base, root.backgroundTint, tintAmount)
+          : base
+        return Theme.withAlpha(tintedBase, transparency)
       }
     }
 

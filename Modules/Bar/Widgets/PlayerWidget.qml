@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Widgets
 import Quickshell.Services.Mpris
@@ -14,7 +15,28 @@ BasePill {
 
   property var barWindow: null
   property var parentScreen: null
+  property color sampledArtworkColor: Theme.primary
+  property bool artworkPaletteReady: false
+  backgroundTint: root.artworkPaletteReady
+    ? Theme.withAlpha(root.sampledArtworkColor, 0.1)
+    : "transparent"
   readonly property real controlSize: Math.round(root.textSize() * 1.5)
+  readonly property color playerPillAccentColor: root.artworkPaletteReady
+    ? Theme.blend(Theme.primary, root.sampledArtworkColor, 0.22)
+    : Theme.primary
+  readonly property color playerAccentColor: root.artworkPaletteReady ? root.sampledArtworkColor : Theme.primary
+  readonly property color playerAccentContainerColor: root.artworkPaletteReady
+    ? Theme.blend(Theme.primaryContainer, Qt.darker(root.sampledArtworkColor, 1.35), 0.45)
+    : Theme.primaryContainer
+  readonly property color playerSecondaryContainerColor: root.artworkPaletteReady
+    ? Theme.blend(Theme.secondaryContainer, Qt.darker(root.sampledArtworkColor, 1.5), 0.3)
+    : Theme.secondaryContainer
+  readonly property color playerSurfaceColor: root.artworkPaletteReady
+    ? Theme.blend(Theme.surfaceDim, root.sampledArtworkColor, 0.18)
+    : Theme.surfaceDim
+  readonly property color playerOutlineColor: root.artworkPaletteReady
+    ? Theme.blend(Theme.outlineVariant, root.sampledArtworkColor, 0.3)
+    : Theme.outlineVariant
   readonly property real overviewSurfaceAlpha: SettingsData.barWidgetTransparency
   readonly property real overviewElementAlpha: Math.max(0.9, root.overviewSurfaceAlpha)
   readonly property real overviewWidth: root.parentScreen
@@ -38,6 +60,7 @@ BasePill {
   property var selectedPlayer: null
   property int popupX: 0
   property int popupY: 0
+  property bool pillHovered: false
   property real displayedPosition: root.player ? root.player.position : 0
   property var visualizerLevels: [0.35, 0.7, 0.5, 0.85, 0.4]
 
@@ -75,6 +98,79 @@ BasePill {
 
   function lowerResolutionArtworkUrl(url) {
     return url.replace("/maxresdefault.jpg", "/hqdefault.jpg")
+  }
+
+  Canvas {
+    id: artworkPaletteSampler
+    z: -1
+    x: 0
+    y: 0
+    width: 32
+    height: 32
+    opacity: 0.01
+    property string sourceUrl: root.artworkUrl
+
+    function loadArtwork() {
+      root.artworkPaletteReady = false
+      if (sourceUrl) {
+        loadImage(sourceUrl)
+        if (isImageLoaded(sourceUrl))
+          requestPaint()
+      }
+    }
+
+    Component.onCompleted: loadArtwork()
+    onSourceUrlChanged: loadArtwork()
+    onImageLoaded: requestPaint()
+    onPaint: {
+      if (!root.artworkUrl || !isImageLoaded(root.artworkUrl))
+        return
+
+      const context = getContext("2d")
+      context.clearRect(0, 0, width, height)
+      context.drawImage(root.artworkUrl, 0, 0, width, height)
+      const pixels = context.getImageData(0, 0, width, height).data
+      const hueBinCount = 18
+      const hueBins = []
+      for (let i = 0; i < hueBinCount; i++)
+        hueBins.push({ weight: 0, red: 0, green: 0, blue: 0 })
+
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i + 3] < 16)
+          continue
+
+        const pixelColor = Qt.rgba(pixels[i] / 255, pixels[i + 1] / 255, pixels[i + 2] / 255, 1)
+        const saturation = pixelColor.hsvSaturation
+        if (saturation < 0.14 || pixelColor.hsvValue < 0.12 || pixelColor.hsvValue > 0.98)
+          continue
+
+        const hueBin = Math.min(hueBinCount - 1, Math.floor(pixelColor.hsvHue * hueBinCount))
+        const weight = saturation
+        hueBins[hueBin].weight += weight
+        hueBins[hueBin].red += pixels[i] / 255 * weight
+        hueBins[hueBin].green += pixels[i + 1] / 255 * weight
+        hueBins[hueBin].blue += pixels[i + 2] / 255 * weight
+      }
+
+      let dominantBin = null
+      for (const bin of hueBins) {
+        if (!dominantBin || bin.weight > dominantBin.weight)
+          dominantBin = bin
+      }
+
+      if (!dominantBin || dominantBin.weight === 0)
+        return
+
+      const average = Qt.rgba(
+        dominantBin.red / dominantBin.weight,
+        dominantBin.green / dominantBin.weight,
+        dominantBin.blue / dominantBin.weight,
+        1
+      )
+      const saturation = Math.max(0.45, Math.min(0.82, average.hsvSaturation))
+      root.sampledArtworkColor = Qt.hsva(average.hsvHue, saturation, 0.62, 1)
+      root.artworkPaletteReady = true
+    }
   }
 
   function fallbackFromLowResolutionArtwork(width) {
@@ -208,7 +304,7 @@ BasePill {
                   anchors.fill: parent
                   radius: height / 2
                   color: parent.selected
-                    ? Theme.withAlpha(Theme.primary, root.overviewElementAlpha)
+                    ? Theme.withAlpha(root.playerAccentColor, root.overviewElementAlpha)
                     : "transparent"
                 }
 
@@ -216,7 +312,7 @@ BasePill {
                   id: tabLabel
                   anchors.centerIn: parent
                   text: parent.modelData.label
-                  color: parent.selected ? "#fffaf4" : "#eee5dc"
+                  color: Theme.surfaceText
                   font.family: Theme.fontFamily
                   font.pixelSize: 12
                   font.weight: parent.selected ? Font.DemiBold : Font.Normal
@@ -246,7 +342,7 @@ BasePill {
             leftPadding: 10
             rightPadding: 30
             text: outputSelector.currentText || "Output device"
-            color: "#f3eee8"
+            color: Theme.surfaceText
             font.family: Theme.fontFamily
             font.pixelSize: 12
             verticalAlignment: Text.AlignVCenter
@@ -262,13 +358,13 @@ BasePill {
             anchors.verticalCenter: parent.verticalCenter
             name: "expand_more"
             size: 18
-            color: "#eee5dc"
+            color: Theme.surfaceText
           }
           background: Rectangle {
             radius: 9
-            color: Theme.withAlpha(Theme.surfaceDim, 0.96)
+            color: Theme.withAlpha(root.playerSurfaceColor, 0.96)
             border.width: 1
-            border.color: Theme.withAlpha(Theme.outlineVariant, 0.85)
+            border.color: Theme.withAlpha(root.playerOutlineColor, 0.85)
           }
           popup: Popup {
             y: outputSelector.height
@@ -277,9 +373,9 @@ BasePill {
             padding: 4
             background: Rectangle {
               radius: 9
-              color: Theme.withAlpha(Theme.surfaceDim, 0.97)
+              color: Theme.withAlpha(root.playerSurfaceColor, 0.97)
               border.width: 1
-              border.color: Theme.withAlpha(Theme.outlineVariant, 0.9)
+              border.color: Theme.withAlpha(root.playerOutlineColor, 0.9)
             }
             contentItem: ListView {
               clip: true
@@ -298,7 +394,7 @@ BasePill {
             highlighted: outputSelector.highlightedIndex === index
             contentItem: Text {
               text: outputSelector.textAt(index)
-              color: "#f3eee8"
+              color: Theme.surfaceText
               font.family: Theme.fontFamily
               font.pixelSize: 12
               verticalAlignment: Text.AlignVCenter
@@ -307,7 +403,7 @@ BasePill {
             background: Rectangle {
               radius: Theme.hoverRadius
               color: parent.highlighted
-                ? Theme.withAlpha(Theme.primary, root.overviewElementAlpha * 0.6)
+                ? Theme.withAlpha(root.playerAccentColor, root.overviewElementAlpha * 0.6)
                 : "transparent"
             }
           }
@@ -333,7 +429,7 @@ BasePill {
         anchors.horizontalCenter: mediaContent.horizontalCenter
         anchors.verticalCenter: mediaContent.verticalCenter
         radius: Theme.cornerRadius
-        color: Theme.withAlpha(Theme.primaryContainer, root.overviewElementAlpha)
+        color: Theme.withAlpha(root.playerAccentContainerColor, root.overviewElementAlpha)
         visible: !root.lyricsOpen
 
         Image {
@@ -360,7 +456,7 @@ BasePill {
           anchors.centerIn: parent
           name: "music_note"
           size: 64
-          color: Theme.withAlpha(Theme.primary, root.overviewElementAlpha)
+          color: Theme.withAlpha(root.playerAccentColor, root.overviewElementAlpha)
           visible: !artworkImage.visible
         }
       }
@@ -394,7 +490,7 @@ BasePill {
           leftPadding: 12
           rightPadding: 30
           text: playerSelector.currentText
-          color: "#f3eee8"
+          color: Theme.surfaceText
           font.family: Theme.fontFamily
           font.pixelSize: 13
           verticalAlignment: Text.AlignVCenter
@@ -410,13 +506,13 @@ BasePill {
           anchors.verticalCenter: parent.verticalCenter
           name: "expand_more"
           size: 20
-          color: "#eee5dc"
+          color: Theme.surfaceText
         }
         background: Rectangle {
           radius: 10
-          color: Theme.withAlpha(Theme.surfaceDim, 0.97)
+          color: Theme.withAlpha(root.playerSurfaceColor, 0.97)
           border.width: 1
-          border.color: Theme.withAlpha(Theme.outlineVariant, 0.9)
+          border.color: Theme.withAlpha(root.playerOutlineColor, 0.9)
         }
         popup: Popup {
           y: playerSelector.height
@@ -425,9 +521,9 @@ BasePill {
           padding: 4
           background: Rectangle {
             radius: 10
-            color: Theme.withAlpha(Theme.surfaceDim, 0.97)
+            color: Theme.withAlpha(root.playerSurfaceColor, 0.97)
             border.width: 1
-            border.color: Theme.withAlpha(Theme.outlineVariant, 0.9)
+            border.color: Theme.withAlpha(root.playerOutlineColor, 0.9)
           }
           contentItem: ListView {
             clip: true
@@ -446,7 +542,7 @@ BasePill {
           highlighted: playerSelector.highlightedIndex === index
           contentItem: Text {
             text: playerSelector.textAt(index)
-            color: "#f3eee8"
+            color: Theme.surfaceText
             font.family: Theme.fontFamily
             font.pixelSize: 13
             verticalAlignment: Text.AlignVCenter
@@ -455,7 +551,7 @@ BasePill {
           background: Rectangle {
             radius: Theme.hoverRadius
             color: parent.highlighted
-              ? Theme.withAlpha(Theme.primary, root.overviewElementAlpha * 0.6)
+              ? Theme.withAlpha(root.playerAccentColor, root.overviewElementAlpha * 0.6)
               : "transparent"
           }
         }
@@ -468,9 +564,9 @@ BasePill {
         anchors.bottom: playerSelectorLabel.bottom
         anchors.margins: -Theme.spaceS
         radius: 9
-        color: Theme.withAlpha(Theme.surfaceDim, 0.97)
+        color: Theme.withAlpha(root.playerSurfaceColor, 0.97)
         border.width: 1
-        border.color: Theme.withAlpha(Theme.outlineVariant, 0.9)
+        border.color: Theme.withAlpha(root.playerOutlineColor, 0.9)
       }
 
       Text {
@@ -479,7 +575,7 @@ BasePill {
         anchors.verticalCenter: playerSelector.verticalCenter
         width: Math.min(110, implicitWidth)
         text: "Listening from"
-        color: "#eee5dc"
+        color: Theme.surfaceText
         font.family: Theme.fontFamily
         font.pixelSize: 12
         visible: playerSelector.visible
@@ -493,9 +589,9 @@ BasePill {
         anchors.bottom: metadata.bottom
         anchors.margins: -Theme.spaceM
         radius: Theme.cornerRadius
-        color: Theme.withAlpha(Theme.surfaceDim, 0.97)
+        color: Theme.withAlpha(root.playerSurfaceColor, 0.97)
         border.width: 1
-        border.color: Theme.withAlpha(Theme.outlineVariant, 0.9)
+        border.color: Theme.withAlpha(root.playerOutlineColor, 0.9)
       }
 
       Column {
@@ -513,7 +609,7 @@ BasePill {
           width: parent.width
           height: 74
           text: root.player ? (root.player.trackTitle || "Unknown track") : ""
-          color: "#fffaf4"
+          color: Qt.lighter(root.playerAccentColor, 1.5)
           font.family: "Gabarito"
           font.pixelSize: 34
           font.weight: Font.Black
@@ -522,7 +618,7 @@ BasePill {
           fontSizeMode: Text.Fit
           minimumPixelSize: 17
           style: Text.Outline
-          styleColor: "#91553f"
+          styleColor: Qt.darker(root.playerAccentColor, 1.5)
           maximumLineCount: 2
           wrapMode: Text.WrapAtWordBoundaryOrAnywhere
           horizontalAlignment: Text.AlignHCenter
@@ -533,7 +629,7 @@ BasePill {
           width: parent.width
           height: 24
           text: root.player ? (root.player.trackArtist || "Unknown Artist") : ""
-          color: "#eee5dc"
+          color: Theme.surfaceText
           font.family: Theme.fontFamily
           font.pixelSize: 15
           font.weight: Font.DemiBold
@@ -546,7 +642,7 @@ BasePill {
           width: parent.width
           height: 20
           text: root.player ? (root.player.trackAlbum || root.player.identity || "") : ""
-          color: "#c9bdb2"
+          color: Theme.surfaceVariantText
           font.family: Theme.fontFamily
           font.pixelSize: 12
           font.weight: Font.Medium
@@ -565,9 +661,9 @@ BasePill {
         anchors.bottom: parent.bottom
         anchors.margins: -Theme.spaceM
         radius: Theme.cornerRadius
-        color: Theme.withAlpha(Theme.surfaceDim, 0.97)
+        color: Theme.withAlpha(root.playerSurfaceColor, 0.97)
         border.width: 1
-        border.color: Theme.withAlpha(Theme.outlineVariant, 0.9)
+        border.color: Theme.withAlpha(root.playerOutlineColor, 0.9)
       }
 
       Item {
@@ -609,7 +705,7 @@ BasePill {
               width: parent.width * Math.max(0, Math.min(1, progressSlider.visualPosition))
               height: parent.height
               radius: 2
-              color: Theme.primary
+              color: root.playerAccentColor
             }
           }
 
@@ -619,7 +715,7 @@ BasePill {
             width: 12
             height: 12
             radius: 6
-            color: Theme.primary
+            color: root.playerAccentColor
             border.width: 1
             border.color: Theme.surfaceContainer
           }
@@ -662,7 +758,7 @@ BasePill {
           anchors.verticalCenter: parent.verticalCenter
           name: "volume_up"
           size: 16
-          color: "#eee5dc"
+          color: Theme.surfaceText
         }
 
         Slider {
@@ -685,13 +781,13 @@ BasePill {
             Rectangle {
               anchors.fill: parent
               radius: 2
-              color: Theme.withAlpha("#f3eee8", 0.3)
+              color: Theme.withAlpha(Theme.surfaceText, 0.3)
             }
             Rectangle {
               width: parent.width * volumeSlider.visualPosition
               height: parent.height
               radius: 2
-              color: Theme.withAlpha(Theme.primary, root.overviewElementAlpha)
+              color: Theme.withAlpha(root.playerAccentColor, root.overviewElementAlpha)
             }
           }
           handle: Rectangle {
@@ -700,7 +796,7 @@ BasePill {
             width: 12
             height: 12
             radius: 6
-            color: Theme.withAlpha(Theme.primary, root.overviewElementAlpha)
+            color: Theme.withAlpha(root.playerAccentColor, root.overviewElementAlpha)
           }
         }
 
@@ -708,7 +804,7 @@ BasePill {
           anchors.verticalCenter: parent.verticalCenter
           width: 38
           text: Math.round((root.player ? root.player.volume : 0) * 100) + "%"
-          color: "#fffaf4"
+          color: Theme.surfaceText
           font.family: Theme.fontFamily
           font.pixelSize: 12
           horizontalAlignment: Text.AlignRight
@@ -729,13 +825,13 @@ BasePill {
           Rectangle {
             anchors.fill: parent
             radius: 12
-            color: Theme.withAlpha(Theme.secondaryContainer, root.overviewElementAlpha)
+            color: Theme.withAlpha(root.playerSecondaryContainerColor, root.overviewElementAlpha)
           }
           DmsIcon {
             anchors.centerIn: parent
             name: "skip_previous"
             size: 22
-            color: "#f3eee8"
+            color: Theme.surfaceText
           }
           MouseArea {
             anchors.fill: parent
@@ -751,13 +847,13 @@ BasePill {
           Rectangle {
             anchors.fill: parent
             radius: 14
-            color: Theme.withAlpha(Theme.primaryContainer, root.overviewElementAlpha)
+            color: Theme.withAlpha(root.playerAccentContainerColor, root.overviewElementAlpha)
           }
           DmsIcon {
             anchors.centerIn: parent
             name: root.player && root.player.isPlaying ? "pause" : "play_arrow"
             size: 30
-            color: "#fffaf4"
+            color: Theme.surfaceText
           }
           MouseArea {
             anchors.fill: parent
@@ -773,13 +869,13 @@ BasePill {
           Rectangle {
             anchors.fill: parent
             radius: 12
-            color: Theme.withAlpha(Theme.secondaryContainer, root.overviewElementAlpha)
+            color: Theme.withAlpha(root.playerSecondaryContainerColor, root.overviewElementAlpha)
           }
           DmsIcon {
             anchors.centerIn: parent
             name: "skip_next"
             size: 22
-            color: "#f3eee8"
+            color: Theme.surfaceText
           }
           MouseArea {
             anchors.fill: parent
@@ -794,58 +890,80 @@ BasePill {
 
   content: Component {
     Item {
-      implicitWidth: root.hasMedia ? playerContent.implicitWidth : 0
+      implicitWidth: root.hasMedia ? playerContent.width : 0
       implicitHeight: root.hasMedia ? playerContent.implicitHeight : 0
+
+      TextMetrics {
+        id: trackLabelMetrics
+        font.family: Theme.monoFontFamily
+        font.pixelSize: root.textSize() * 0.8
+        text: root.trackText()
+      }
 
       Column {
         id: playerContent
         visible: root.hasMedia
+        width: Math.max(
+          Math.min(180, Math.max(trackLabelMetrics.advanceWidth, 3 * root.controlSize + 4)),
+          3 * root.controlSize + 4 + 2 * (30 + Theme.spaceXS)
+        )
         spacing: 0
         anchors.horizontalCenter: parent.horizontalCenter
 
+        MouseArea {
+          id: playerPillHover
+          parent: root
+          z: -1
+          anchors.fill: parent
+          hoverEnabled: true
+          acceptedButtons: Qt.NoButton
+          onContainsMouseChanged: root.pillHovered = containsMouse
+        }
+
         Item {
           implicitWidth: controls.implicitWidth
-            + (root.player && root.player.isPlaying ? 4 + 30 + Theme.spaceS : 0)
+            + 2 * (visualizer.width + Theme.spaceXS)
           implicitHeight: root.controlSize
+          width: implicitWidth
           anchors.horizontalCenter: parent.horizontalCenter
 
           Item {
-          id: visualizer
-          visible: root.player && root.player.isPlaying
-          width: 30
-          height: root.controlSize
-          clip: true
-          anchors.right: controls.left
-          anchors.rightMargin: 4
-          anchors.verticalCenter: controls.verticalCenter
+            id: visualizer
+            visible: root.player && root.player.isPlaying
+            width: 30
+            height: root.controlSize
+            clip: true
+            anchors.right: controls.left
+            anchors.rightMargin: Theme.spaceXS
+            anchors.verticalCenter: controls.verticalCenter
 
-          Row {
-            anchors.fill: parent
-            anchors.margins: 2
-            spacing: 2
-            Repeater {
-              model: root.visualizerLevels.length
-              delegate: Rectangle {
-                required property int index
-                width: 3
-                height: Math.max(3, parent.height * root.visualizerLevels[index])
-                anchors.bottom: parent.bottom
-                radius: width / 2
-                color: Theme.primary
-                Behavior on height {
-                  NumberAnimation {
-                    duration: 80
-                    easing.type: Easing.OutQuad
+            Row {
+              anchors.fill: parent
+              anchors.margins: 2
+              spacing: 2
+              Repeater {
+                model: root.visualizerLevels.length
+                delegate: Rectangle {
+                  required property int index
+                  width: 3
+                  height: Math.max(3, parent.height * root.visualizerLevels[index])
+                  anchors.bottom: parent.bottom
+                  radius: width / 2
+                  color: root.playerPillAccentColor
+                  Behavior on height {
+                    NumberAnimation {
+                      duration: 80
+                      easing.type: Easing.OutQuad
+                    }
                   }
                 }
               }
             }
           }
-        }
 
           Row {
             id: controls
-            anchors.right: parent.right
+            anchors.horizontalCenter: parent.horizontalCenter
             anchors.verticalCenter: parent.verticalCenter
             spacing: 2
 
@@ -879,7 +997,7 @@ BasePill {
               anchors.fill: parent
               name: parent.iconName
               size: root.controlSize
-              color: Theme.primary
+              color: root.playerPillAccentColor
             }
             MouseArea {
               anchors.fill: parent
@@ -912,12 +1030,28 @@ BasePill {
         }
 
         Text {
-          width: Math.min(180, Math.max(implicitWidth, 3 * root.controlSize + 4))
+          width: parent.width
           text: root.trackText()
           color: Theme.widgetTextColor
           font.family: Theme.monoFontFamily
           font.pixelSize: root.textSize() * 0.8
           elide: Text.ElideRight
+          horizontalAlignment: Text.AlignHCenter
+          opacity: root.pillHovered ? 1 : 0.18
+          layer.enabled: !root.pillHovered
+          layer.effect: MultiEffect {
+            blurEnabled: true
+            blur: 1
+            blurMax: Theme.spaceXL
+          }
+
+          Behavior on opacity {
+            NumberAnimation {
+              duration: Theme.shortDuration
+              easing.type: Easing.OutCubic
+            }
+          }
+
         }
       }
     }
