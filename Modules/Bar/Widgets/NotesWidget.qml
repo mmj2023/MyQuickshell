@@ -72,6 +72,10 @@ BasePill {
     })
   }
 
+  function toggleNotesExpanded() {
+    SettingsData.set("notesExpanded", !root.expanded)
+  }
+
   function handleNvimCommandKey(event) {
     if (root.nvimCommandSubmitting) {
       event.accepted = true
@@ -167,6 +171,14 @@ BasePill {
       return
     }
     const control = (event.modifiers & Qt.ControlModifier) !== 0
+    const alt = (event.modifiers & Qt.AltModifier) !== 0
+    const shift = (event.modifiers & Qt.ShiftModifier) !== 0
+    if (NotesService.nvimAvailable && NotesService.nvimMode.startsWith("n")
+        && event.key === Qt.Key_F && alt && !control && !shift) {
+      root.toggleNotesExpanded()
+      event.accepted = true
+      return
+    }
     if (NotesService.nvimAvailable
         && (NotesService.nvimMode.startsWith("n")
           || NotesService.nvimMode.startsWith("v")
@@ -836,7 +848,7 @@ BasePill {
               anchors.fill: parent
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
-              onClicked: SettingsData.set("notesExpanded", !root.expanded)
+              onClicked: root.toggleNotesExpanded()
             }
           }
 
