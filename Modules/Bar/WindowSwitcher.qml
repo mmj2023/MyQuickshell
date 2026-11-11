@@ -105,7 +105,7 @@ Item {
               Text {
                 width: parent.width - switcherCount.width
                 height: parent.height
-                text: qsTr("Window Switcher")
+                text: WindowSwitcherService.viewTitle
                 color: Theme.surfaceText
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeMedium
@@ -170,10 +170,26 @@ Item {
                     color: "transparent"
                     clip: true
 
+                    Rectangle {
+                      anchors.fill: parent
+                      visible: !windowPreview.hasContent
+                      color: Theme.surfaceContainer
+
+                      Text {
+                        anchors.centerIn: parent
+                        text: qsTr("Preview unavailable")
+                        color: Theme.surfaceText
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                      }
+                    }
+
                     ScreencopyView {
+                      id: windowPreview
                       anchors.fill: parent
                       captureSource: windowCard.modelData.window
                       live: switcherWindow.visible
+                        && index === WindowSwitcherService.selectedIndex
                       constraintSize.width: parent.width
                       constraintSize.height: parent.height
                     }
@@ -213,7 +229,10 @@ Item {
                   onEntered: WindowSwitcherService.selectedIndex = windowCard.index
                   onClicked: {
                     WindowSwitcherService.selectedIndex = windowCard.index
-                    WindowSwitcherService.commit()
+                    if (WindowSwitcherService.isGroupItem(windowCard.modelData))
+                      WindowSwitcherService.enterSelectedGroup()
+                    else
+                      WindowSwitcherService.commit()
                   }
                 }
               }
@@ -222,7 +241,9 @@ Item {
             Text {
               width: parent.width
               height: Theme.spaceL
-              text: qsTr("Ctrl pins · Tab cycles · re-press/release Alt, Esc, or click commits")
+              text: WindowSwitcherService.viewMode !== "top"
+                ? qsTr("Tab cycles apps · Enter selects · Esc returns")
+                : qsTr("Ctrl pins · Tab cycles · Enter opens/selects · Alt release commits")
               color: Theme.widgetInactiveIconColor
               font.family: Theme.fontFamily
               font.pixelSize: Theme.fontSizeSmall
@@ -251,13 +272,10 @@ Item {
             }
             event.accepted = true
           } else if (event.key === Qt.Key_Escape) {
-            if (WindowSwitcherService.overlayLatched)
-              WindowSwitcherService.commit()
-            else
-              WindowSwitcherService.cancel()
+            WindowSwitcherService.handleEscape()
             event.accepted = true
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            WindowSwitcherService.commit()
+            WindowSwitcherService.handleEnter()
             event.accepted = true
           } else if (event.key === Qt.Key_Left) {
             WindowSwitcherService.cycle(-1)
