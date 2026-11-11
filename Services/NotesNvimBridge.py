@@ -652,6 +652,7 @@ def ensure_document_buffer(nvim, document_id, text, filename):
         buffer_documents[buffer] = document_id
         visible_highlight_ranges[buffer] = (0, HIGHLIGHT_CHUNK_LINES)
         set_buffer_text(target, text)
+        target.options["modified"] = False
     set_buffer_filetype(nvim, buffer, filename, buffer_text(nvim.buffers[buffer]))
     if pending_reuse_buffer is not None:
         if pending_reuse_buffer != buffer and nvim.api.buf_is_valid(pending_reuse_buffer):
@@ -762,6 +763,42 @@ def run_snapshot_worker(nvim):
                 visible_highlight_ranges[buffer] = (start_row, end_row)
             elif operation == "close_document":
                 close_document(nvim, int(request["document_id"]))
+            elif operation == "mark_saved":
+                document_id = int(request["document_id"])
+                buffer_number = document_buffers.get(document_id)
+                if buffer_number is not None and nvim.api.buf_is_valid(buffer_number):
+                    target = nvim.buffers[buffer_number]
+                    if buffer_text(target) == request.get("text", ""):
+                        target.options["modified"] = False
+                continue
+            elif operation == "reload_document":
+                document_id = int(request["document_id"])
+                buffer_number = document_buffers.get(document_id)
+                if buffer_number is None or not nvim.api.buf_is_valid(buffer_number):
+                    raise ValueError(f"Unknown Notes document: {document_id}")
+                target = nvim.buffers[buffer_number]
+                if target.options["modified"]:
+                    emit({
+                        "type": "external_conflict",
+                        "id": request_id,
+                        "document_id": document_id,
+                        "text": request.get("text", ""),
+                    })
+                    continue
+                set_buffer_text(target, request.get("text", ""))
+                target.options["modified"] = False
+                set_buffer_filetype(
+                    nvim,
+                    buffer_number,
+                    request.get("filename", ""),
+                    buffer_text(target),
+                )
+                emit({
+                    "type": "document_snapshot",
+                    "id": request_id,
+                    "document_id": document_id,
+                    "text": buffer_text(target),
+                })
             elif operation == "add_command_history":
                 nvim.call("histadd", ":", request["command"])
             elif operation == "set_cursor":
@@ -893,7 +930,8 @@ try:
                 input_nvim.input(request["keys"])
             elif operation not in {
                 "select_document", "register_documents", "set_filetype",
-                "close_document", "set_cursor", "set_highlight_range", "sync",
+                "close_document", "mark_saved", "reload_document", "set_cursor",
+                "set_highlight_range", "sync",
                 "command_state", "add_command_history",
             }:
                 raise ValueError(f"Unknown operation: {operation}")

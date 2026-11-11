@@ -31,6 +31,8 @@ BasePill {
   property string nvimDisplayHighlightKey: ""
   property string nvimDisplaySearchHighlightKey: ""
   property var nvimLineStarts: [0]
+  property int nvimRenderGeneration: 0
+  property var pendingNvimCursor: null
   property string lastNvimHighlightRange: ""
   property bool preservingNvimViewport: false
 
@@ -283,7 +285,7 @@ BasePill {
     const widestLine = lines.reduce((widest, line) =>
       Math.max(widest, Array.from(line).length), 0)
     return Math.max(editorFlickable.width,
-      widestLine * root.nvimCharacterWidth("M") + lineNumbers.width
+      widestLine * editorWidthMetrics.advanceWidth + lineNumbers.width
         + editorRow.spacing + noteEditor.leftPadding + noteEditor.rightPadding)
   }
 
@@ -477,6 +479,24 @@ BasePill {
       .slice(0, Math.max(0, column)).join("").length
   }
 
+  function scheduleNvimCursorUpdate(state) {
+    Qt.callLater(function() {
+      if (state.generation !== root.nvimRenderGeneration)
+        return
+      noteEditor.cursorPosition = root.editorTextPosition(state.row, state.column)
+      root.nvimSelectionRects =
+        root.buildNvimSelectionRects(root.nvimSelections)
+      if (state.preserveViewport)
+        editorFlickable.contentY = state.previousContentY
+      else
+        editorFlickable.ensureCursorVisible()
+      root.pendingNvimCursor = null
+      root.preservingNvimViewport = false
+      root.applyingNvimState = false
+      nvimHighlightRangeTimer.restart()
+    })
+  }
+
   function appendNvimSelectionRect(rects, x, y, width, height) {
     if (width <= 0 || height <= 0)
       return
@@ -640,9 +660,22 @@ BasePill {
   }
 
   TextMetrics {
+    id: editorWidthMetrics
+    font: noteEditor.font
+    text: "M"
+  }
+
+  TextMetrics {
     id: spaceMetrics
     font: noteEditor.font
     text: " "
+  }
+
+  TextMetrics {
+    id: nvimShowcmdMetrics
+    font.family: Theme.monoFontFamily
+    font.pixelSize: Theme.fontSizeSmall
+    text: NotesService.nvimShowcmd
   }
 
   Timer {
@@ -694,7 +727,15 @@ BasePill {
       const preserveViewport = !textChanged
         && NotesService.nvimSnapshotOperation === "set_highlight_range"
       const previousContentY = editorFlickable.contentY
+      const state = {
+        row: row,
+        column: column,
+        generation: ++root.nvimRenderGeneration,
+        preserveViewport: preserveViewport,
+        previousContentY: previousContentY
+      }
       root.preservingNvimViewport = preserveViewport
+      root.pendingNvimCursor = textChanged ? state : null
       if (textChanged) {
         root.nvimDisplaySourceText = sourceText
         root.updateNvimLineStarts(sourceText)
@@ -707,18 +748,8 @@ BasePill {
         root.nvimDisplayText = root.buildNvimRichText(
           sourceText, nextHighlights, nextSearchHighlights)
       }
-      Qt.callLater(function() {
-        noteEditor.cursorPosition = root.editorTextPosition(row, column)
-        root.nvimSelectionRects =
-          root.buildNvimSelectionRects(root.nvimSelections)
-        if (preserveViewport)
-          editorFlickable.contentY = previousContentY
-        else
-          editorFlickable.ensureCursorVisible()
-        root.preservingNvimViewport = false
-        root.applyingNvimState = false
-        nvimHighlightRangeTimer.restart()
-      })
+      if (!textChanged)
+        root.scheduleNvimCursorUpdate(state)
     }
     function onFileChooserFinished(requester, operation, exitCode, output, errorOutput) {
       if (requester !== root)
@@ -744,8 +775,11 @@ BasePill {
       NotesService.startNvimBackend()
       focusEditorTimer.restart()
     } else {
-      notesPopup.visible = false
       focusEditorTimer.stop()
+      if (notesPopup.activeFocusItem)
+        notesPopup.activeFocusItem.focus = false
+      Qt.inputMethod.hide()
+      notesPopup.visible = false
     }
   }
 
@@ -1314,17 +1348,26 @@ BasePill {
                 onTextChanged: {
                   if (!NotesService.nvimAvailable)
                     NotesService.editCurrentText(text)
+                  else if (root.pendingNvimCursor) {
+                    const state = root.pendingNvimCursor
+                    root.pendingNvimCursor = null
+                    root.scheduleNvimCursorUpdate(state)
+                  }
                 }
                 onCursorPositionChanged: {
-                  editorFlickable.ensureCursorVisible()
+                  if (!root.applyingNvimState)
+                    editorFlickable.ensureCursorVisible()
                   if (!root.applyingNvimState)
                     root.sendNvimCursor(cursorPosition)
                 }
                 onCursorRectangleChanged: {
-                  if (!root.preservingNvimViewport)
+                  if (!root.preservingNvimViewport && !root.applyingNvimState)
                     editorFlickable.ensureCursorVisible()
                 }
-                onContentHeightChanged: editorFlickable.ensureCursorVisible()
+                onContentHeightChanged: {
+                  if (!root.applyingNvimState)
+                    editorFlickable.ensureCursorVisible()
+                }
                 onWidthChanged: Qt.callLater(function() {
                   root.nvimSelectionRects =
                     root.buildNvimSelectionRects(root.nvimSelections)
@@ -1617,7 +1660,7 @@ BasePill {
           Text {
             id: nvimShowcmdStatus
             visible: NotesService.nvimAvailable && NotesService.nvimShowcmd !== ""
-            width: visible ? implicitWidth : 0
+            width: visible ? nvimShowcmdMetrics.advanceWidth : 0
             height: parent.height
             text: NotesService.nvimShowcmd
             color: Theme.widgetInactiveIconColor

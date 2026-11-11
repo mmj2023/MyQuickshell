@@ -8,7 +8,8 @@ This project is a Quickshell desktop shell, not a conventional app with a test r
 - Run it detached: `make run-detach`
 - Stop the detached instance: `make stop`
 - Lint the QML project: `make lint`
-- Direct shell start: `quickshell -p .` or `quickshell -p . -d`
+- Direct shell start: `quickshell -p .` or `quickshell -p . -d` (run
+  `make install-desktop` first so desktop portals can resolve the app ID)
 
 `make lint` is the repo's validation command. It runs `qmllint -I . shell.qml $(find . -name '*.qml' -not -path './.git/*')` and is the closest thing to a project-wide check.
 

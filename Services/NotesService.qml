@@ -18,7 +18,9 @@ Singleton {
   property int currentIndex: 0
   property int _nextId: 1
   property int _autoSaveDocumentId: -1
-  property int _pendingWrites: 0
+  property var _pendingWritesByDocument: ({})
+  property var _pendingWritesByPath: ({})
+  property var _documentWatchers: ({})
   property string error: ""
   property bool ready: false
   property bool sessionLoaded: false
@@ -57,7 +59,8 @@ Singleton {
   readonly property string currentText: nvimAvailable
     ? nvimText : (currentDocument ? currentDocument.text : "")
   readonly property bool currentDirty: currentDocument ? currentDocument.text !== currentDocument.savedText : false
-  readonly property bool saving: _pendingWrites > 0
+  readonly property bool saving: currentDocument
+    ? Number(_pendingWritesByDocument[currentDocument.id] || 0) > 0 : false
 
   signal fileChooserFinished(var requester, string operation, int exitCode, string output, string errorOutput)
   signal toggleRequested(var monitor)
@@ -69,6 +72,7 @@ Singleton {
   onDocumentsChanged: {
     scheduleSessionSave()
     syncNvimDocumentMetadata()
+    syncDocumentWatchers()
   }
   onCurrentIndexChanged: {
     scheduleSessionSave()
@@ -160,6 +164,25 @@ Singleton {
       return
     }
 
+    if (message.type === "document_snapshot") {
+      const documentIndex = documents.findIndex(doc => doc.id === Number(message.document_id))
+      if (documentIndex < 0)
+        return
+      const document = documents[documentIndex]
+      const text = String(message.text || "")
+      updateDocument(document.id, { text: text, savedText: text })
+      if (_nvimActiveDocumentId === document.id)
+        nvimText = text
+      return
+    }
+    if (message.type === "external_conflict") {
+      const document = documents.find(doc => doc.id === Number(message.document_id))
+      if (!document)
+        return
+      updateDocument(document.id, { savedText: String(message.text || "") })
+      error = qsTr("This note changed on disk while it has unsaved edits.")
+      return
+    }
     if (message.type === "ready") {
       nvimStarting = false
       nvimAvailable = true
@@ -527,9 +550,14 @@ Singleton {
     }
     if (nvimAvailable)
       closeNvimDocument(documents[index].id)
+    const closedDocumentId = documents[index].id
     const next = documents.slice()
     next.splice(index, 1)
     documents = next
+    const pending = Object.assign({}, _pendingWritesByDocument)
+    delete pending[closedDocumentId]
+    _pendingWritesByDocument = pending
+    destroyDocumentWatcher(closedDocumentId)
     if (next.length === 0) {
       currentIndex = 0
       newDocument()
@@ -597,6 +625,73 @@ Singleton {
     documents = next
   }
 
+  function adjustPendingWrite(mapName, key, delta) {
+    const map = Object.assign({}, root[mapName])
+    const count = Number(map[key] || 0) + delta
+    if (count > 0)
+      map[key] = count
+    else
+      delete map[key]
+    root[mapName] = map
+  }
+
+  function syncDocumentWatchers() {
+    for (const id of Object.keys(_documentWatchers)) {
+      const document = documents.find(doc => String(doc.id) === id)
+      const watcher = _documentWatchers[id]
+      if (!document || !document.path) {
+        watcher.destroy()
+        delete _documentWatchers[id]
+      } else if (watcher.path !== document.path) {
+        watcher.destroy()
+        delete _documentWatchers[id]
+      }
+    }
+    for (const document of documents) {
+      if (!document.path || _documentWatchers[String(document.id)])
+        continue
+      const watcher = documentWatcher.createObject(root, {
+        documentId: document.id,
+        initialized: false
+      })
+      if (!watcher)
+        continue
+      _documentWatchers[String(document.id)] = watcher
+      watcher.path = document.path
+    }
+  }
+
+  function destroyDocumentWatcher(documentId) {
+    const key = String(documentId)
+    const watcher = _documentWatchers[key]
+    if (!watcher)
+      return
+    watcher.destroy()
+    delete _documentWatchers[key]
+  }
+
+  function handleExternalFileChange(documentId, content) {
+    const document = documents.find(doc => doc.id === documentId)
+    if (!document || content === document.savedText)
+      return
+    if (Number(_pendingWritesByPath[document.path] || 0) > 0)
+      return
+    if (nvimAvailable) {
+      if (sendNvimRequest("reload_document", {
+          document_id: document.id,
+          text: content,
+          filename: document.path || document.title || ""
+        }))
+        return
+    }
+    if (document.text !== document.savedText) {
+      updateDocument(document.id, { savedText: content })
+      error = qsTr("This note changed on disk while it has unsaved edits.")
+      return
+    }
+    updateDocument(document.id, { text: content, savedText: content })
+  }
+
   function openFile(url) {
     if (!ready)
       return
@@ -651,7 +746,8 @@ Singleton {
       return false
     autoSaveTimer.stop()
     error = ""
-    _pendingWrites++
+    adjustPendingWrite("_pendingWritesByDocument", doc.id, 1)
+    adjustPendingWrite("_pendingWritesByPath", path, 1)
     if (_autoSaveDocumentId === doc.id)
       _autoSaveDocumentId = -1
     const request = {
@@ -663,7 +759,7 @@ Singleton {
     }
     const fileView = fileOperation.createObject(root, { request: request })
     if (!fileView) {
-      _pendingWrites--
+      finishWrite(request)
       error = qsTr("Couldn't save the note.")
       console.error("NotesService could not create a file writer for:", path)
       return false
@@ -694,22 +790,35 @@ Singleton {
   }
 
   function handleWrite(request) {
-    _pendingWrites = Math.max(0, _pendingWrites - 1)
+    finishWrite(request)
     updateDocument(request.documentId, {
       path: request.path,
       title: request.title,
       savedText: request.text
     })
+    if (nvimAvailable && documents.some(doc => doc.id === request.documentId))
+      sendNvimRequest("mark_saved", {
+        document_id: request.documentId,
+        text: request.text
+      })
     error = ""
   }
 
   function handleFileError(request, detail) {
     if (request.operation === "write")
-      _pendingWrites = Math.max(0, _pendingWrites - 1)
+      finishWrite(request)
     error = request.operation === "read"
       ? qsTr("Couldn't open the selected file.")
       : qsTr("Couldn't save the note.")
     console.error("NotesService file operation failed:", request.path, detail)
+  }
+
+  function finishWrite(request) {
+    if (request.finished)
+      return
+    request.finished = true
+    adjustPendingWrite("_pendingWritesByDocument", request.documentId, -1)
+    adjustPendingWrite("_pendingWritesByPath", request.path, -1)
   }
 
   Component {
@@ -747,6 +856,29 @@ Singleton {
       onSaveFailed: function(message) {
         root.handleFileError(request, message)
         destroy()
+      }
+    }
+  }
+
+  Component {
+    id: documentWatcher
+
+    FileView {
+      property int documentId: -1
+      property bool initialized: false
+      watchChanges: true
+      onLoaded: {
+        if (initialized)
+          root.handleExternalFileChange(documentId, text() || "")
+        else
+          initialized = true
+      }
+      onFileChanged: reload()
+      onLoadFailed: function(message) {
+        if (initialized)
+          console.warn("NotesService could not reload externally changed note:", path, message)
+        else
+          initialized = true
       }
     }
   }
