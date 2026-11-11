@@ -39,7 +39,8 @@ BasePill {
 
   content: Component {
     Row {
-      spacing: 8
+      readonly property bool privacyActive: PrivacyService.activeIndicators.length > 0
+      spacing: privacyActive ? Theme.spaceXXS : Theme.spaceS
       anchors.verticalCenter: parent.verticalCenter
 
       // Time + Date Column
@@ -47,16 +48,57 @@ BasePill {
         spacing: 0
         anchors.verticalCenter: parent.verticalCenter
 
-        Text {
-          anchors.horizontalCenter: parent.horizontalCenter
-          text: ClockService.timeString
-          color: Theme.widgetTextColor
-          font.family: Theme.monoFontFamily
-          font.pixelSize: root.textSize()
-          font.bold: true
+        Item {
+          id: timeRow
+          implicitWidth: dateRow.implicitWidth
+          implicitHeight: Math.max(timeLabel.implicitHeight, Theme.iconSizeSmall)
+
+          Text {
+            id: timeLabel
+            anchors.centerIn: parent
+            text: ClockService.timeString
+            color: Theme.widgetTextColor
+            font.family: Theme.monoFontFamily
+            font.pixelSize: root.textSize()
+            font.bold: true
+          }
+
+          Item {
+            id: wallpaperButton
+            x: timeLabel.x + timeLabel.width + Theme.spaceXXS
+            anchors.verticalCenter: parent.verticalCenter
+            width: Theme.iconSizeSmall
+            height: Theme.iconSizeSmall
+
+            Rectangle {
+              anchors.fill: parent
+              anchors.topMargin: Theme.hoverVerticalInset
+              anchors.bottomMargin: Theme.hoverVerticalInset
+              radius: Theme.hoverRadius
+              color: wallpaperButtonMouse.containsMouse
+                ? Theme.withAlpha(Theme.primary, 0.12)
+                : "transparent"
+            }
+
+            DmsIcon {
+              anchors.centerIn: parent
+              name: "wallpaper"
+              size: root.iconSize(-3)
+              color: Theme.widgetIconColor
+            }
+
+            MouseArea {
+              id: wallpaperButtonMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: WallpaperService.openOverview(root.parentScreen)
+            }
+          }
         }
 
         Row {
+          id: dateRow
           anchors.horizontalCenter: parent.horizontalCenter
           spacing: 6
 
@@ -84,11 +126,51 @@ BasePill {
         color: Theme.withAlpha(Theme.outline, 0.25)
       }
 
+      Item {
+        id: privacyIndicator
+        anchors.verticalCenter: parent.verticalCenter
+        visible: activeIndicators.length > 0
+        width: visible ? Theme.iconSizeSmall : 0
+        height: root.widgetThickness
+        readonly property var activeIndicators: PrivacyService.activeIndicators
+        readonly property real statusIconSize: activeIndicators.length > 0
+          ? Math.min(
+            Theme.iconSizeSmall,
+            (root.widgetThickness - Theme.spaceXXS * (activeIndicators.length - 1))
+              / activeIndicators.length
+          )
+          : Theme.iconSizeSmall
+
+        Column {
+          anchors.centerIn: parent
+          spacing: Theme.spaceXXS
+
+          Repeater {
+            model: privacyIndicator.activeIndicators
+
+            delegate: Item {
+              required property var modelData
+              width: privacyIndicator.width
+              height: privacyIndicator.statusIconSize
+
+              DmsIcon {
+                anchors.centerIn: parent
+                name: modelData.name
+                size: privacyIndicator.statusIconSize
+                color: modelData.color
+                filled: true
+              }
+            }
+          }
+        }
+      }
+
       // Weather Indicator (Icon + Temp) - Clickable to open overview
       Item {
         id: weatherClickArea
         anchors.verticalCenter: parent.verticalCenter
-        width: weatherRow.implicitWidth + Theme.spaceXS * 2
+        width: weatherRow.implicitWidth
+          + (privacyIndicator.visible ? Theme.spaceXXS : Theme.spaceXS * 2)
         height: weatherRow.implicitHeight + Theme.hoverVerticalInset * 2
 
         Rectangle {

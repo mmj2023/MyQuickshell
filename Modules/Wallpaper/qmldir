@@ -1,0 +1,4 @@
+module qs.Modules.Wallpaper
+WallpaperBackground 1.0 WallpaperBackground.qml
+WallpaperOverlay 1.0 WallpaperOverlay.qml
+WallpaperManager 1.0 WallpaperManager.qml

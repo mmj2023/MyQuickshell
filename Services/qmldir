@@ -12,3 +12,5 @@ singleton BluetoothService 1.0 BluetoothService.qml
 singleton WorkspacesService 1.0 WorkspacesService.qml
 singleton WeatherService 1.0 WeatherService.qml
 singleton BatteryPowerService 1.0 BatteryPowerService.qml
+singleton WallpaperService 1.0 WallpaperService.qml
+singleton PrivacyService 1.0 PrivacyService.qml

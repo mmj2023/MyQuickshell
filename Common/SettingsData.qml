@@ -14,7 +14,7 @@ import "Settings/SpecUtil.js" as Util
 Singleton {
   id: root
 
-  readonly property int settingsConfigVersion: 8
+  readonly property int settingsConfigVersion: 9
   readonly property string _configDir: StandardPaths.writableLocation(StandardPaths.ConfigLocation) + "/myquickshell"
   readonly property string settingsPath: _configDir + "/settings.json"
 
@@ -68,6 +68,16 @@ Singleton {
   property int barTransparency: 0
   property bool barBlurEnabled: false
   property real barWidgetTransparency: 0.65
+  property string wallpaperSource: "#000000"
+  property string wallpaperType: "color"
+  property string wallpaperApplyScope: "global"
+  property var wallpaperWorkspaceOverrides: ({})
+  property string wallpaperVideoResolution: "best"
+  property var wallpaperDirectories: []
+  property bool wallpaperCycleEnabled: false
+  property int wallpaperIntervalMinutes: 30
+  property string wallpaperFit: "cover"
+  property string wallpaperShortcut: ""
   property int barSpacing: 0
   property int barInnerPadding: -2
   property int barPosition: 1

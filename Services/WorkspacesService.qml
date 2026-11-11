@@ -13,6 +13,7 @@ import Quickshell.Hyprland
 //   workspaceIds   - every workspace id present in the layout (sorted)
 //   occupiedIds    - workspaces that currently have a window open
 //   activeWorkspaceId(name) - active workspace id for a monitor, by name
+//   activeWorkspaceName(name) - active workspace name for a monitor
 //   switchTo(id)   - focus a workspace
 //
 // A Niri/I3/generic backend can later implement the same surface without the
@@ -25,6 +26,7 @@ QtObject {
 
   // Active workspace id per monitor name, refreshed from hyprctl.
   property var activeByMonitor: ({})
+  property var activeNameByMonitor: ({})
   readonly property string desktop: (Quickshell.env("XDG_CURRENT_DESKTOP") || Quickshell.env("DESKTOP_SESSION") || "").toLowerCase()
   readonly property string backend: desktop.indexOf("niri") !== -1 ? "niri"
     : (desktop.indexOf("hypr") !== -1 ? "hyprland"
@@ -35,6 +37,10 @@ QtObject {
   function activeWorkspaceId(monitorName) {
     var v = activeByMonitor[monitorName]
     return v === undefined ? 0 : v
+  }
+
+  function activeWorkspaceName(monitorName) {
+    return String(activeNameByMonitor[monitorName] || "")
   }
 
   readonly property var specialWorkspaceNames: {
@@ -161,6 +167,7 @@ QtObject {
 
   function handleMonitors(raw) {
     var byMonitor = {}
+    var namesByMonitor = {}
     try {
       var arr = JSON.parse(String(raw || ""))
       if (Array.isArray(arr)) {
@@ -168,11 +175,15 @@ QtObject {
           var m = arr[i]
           var name = String(m.name || "")
           var active = m.activeWorkspace ? m.activeWorkspace.id : 0
-          if (name) byMonitor[name] = active
+          if (name) {
+            byMonitor[name] = active
+            namesByMonitor[name] = String(m.activeWorkspace?.name || "")
+          }
         }
       }
     } catch (e) { }
     activeByMonitor = byMonitor
+    activeNameByMonitor = namesByMonitor
   }
 
   function switchTo(id) {

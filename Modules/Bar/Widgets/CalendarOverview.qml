@@ -401,7 +401,7 @@ PopupWindow {
                     }
 
                     Text {
-                        width: parent.width - 128
+                        width: parent.width - 160
                         height: parent.height
                         verticalAlignment: Text.AlignVCenter
                         horizontalAlignment: Text.AlignHCenter
@@ -409,6 +409,33 @@ PopupWindow {
                         color: Theme.widgetTextColor
                         font.pixelSize: 17
                         font.weight: Font.Medium
+                    }
+
+                    Rectangle {
+                        width: 32
+                        height: 32
+                        radius: Theme.hoverRadius
+                        color: wallpaperMouse.containsMouse
+                            ? Theme.withAlpha(Theme.primary, 0.16)
+                            : "transparent"
+
+                        DmsIcon {
+                            anchors.centerIn: parent
+                            name: "wallpaper"
+                            size: 17
+                            color: Theme.widgetInactiveIconColor
+                        }
+
+                        MouseArea {
+                            id: wallpaperMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                WallpaperService.openOverview(root.barWindow ? root.barWindow.screen : null)
+                                root.visible = false
+                            }
+                        }
                     }
 
                     Rectangle {
