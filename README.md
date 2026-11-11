@@ -56,8 +56,15 @@ relative (`:set nu relativenumber`).
 > release of the Alt used to open it keeps it open. Re-pressing and releasing
 > Alt, Esc, or clicking commits the selected window and closes the overlay.
 > While latched, Tab/Shift+Tab advances the preview selection without closing
-> the overlay. Use Alt+Shift+Tab or
-> Alt+grave to cycle backward. On startup, MyQuickshell
+> the overlay. The pinned switcher shows open special workspaces as group
+> options; Enter opens a group's apps, Tab cycles them, and Esc returns to the
+> group list. Pressing and releasing Alt again while a group option is selected
+> opens that group and keeps the overlay open. A second Esc closes/cancels or
+> commits an app selection. If the switcher starts on a visible special
+> workspace, its apps are included; the underlying regular workspace's apps
+> are listed individually when there are one or two, or as a workspace group
+> when there are more.
+> Use Alt+Shift+Tab or Alt+grave to cycle backward. On startup, MyQuickshell
 > replaces Hyprshell's matching Alt+Tab bindings so the switchers do not compete.
 > Right-clicking the workspace pill outside its numbered buttons opens the
 > optional ScrollOverview live workspace overview.
@@ -82,8 +89,10 @@ relative (`:set nu relativenumber`).
 - **Hyprland integration:** `hyprctl` is used for workspace state and related
   compositor actions; those widgets are unavailable outside Hyprland. The
   Alt+Tab switcher uses Hyprland's dynamic Lua binding API and Quickshell's
-  native Wayland screencopy support; it requires no additional runtime
-  dependency.
+  native Wayland screencopy support. Wallpaper shortcut conflict checks also
+  read Lua config files under the XDG config directory using `find`; if the
+  config cannot be read or a bind expression cannot be resolved, the shortcut
+  is not changed.
 - **Bar backdrop blur (optional):** The bar's Blur option marks the bar surface
   as a blur region through Quickshell's Wayland background-effect support. The
   compositor must support `ext-background-effect-v1`; when supported, the
@@ -91,6 +100,63 @@ relative (`:set nu relativenumber`).
   The option starts off and does not change the compositor's global blur
   setting. On compositors without this protocol, the option has no visual
   effect.
+- **Wallpapers:** MyQuickshell renders a per-screen background layer, black by
+  default. The clock calendar overlay opens the wallpaper library, where you
+  can choose a local file, add multiple folders, set a solid hex color, or use
+  an HTTP(S) media URL. Images and animated GIFs use Qt Quick's image provider.
+  Folder scanning also finds audio and video files, QML scenes, and 3D models.
+  It scans each configured folder's direct contents, including symlinks to
+  files; add a nested folder separately to include it. AV1/AVIF files are
+  recognized alongside common image, audio, and video formats. The library
+  groups items by configured folder, with collapsible groups and per-folder
+  removal.
+  The wallpaper shortcut opens a separate Omarchy-style image-card switcher;
+  the clock overlay retains the full library and settings. Slideshow rotation
+  and cover/contain fitting are configurable and persisted in `settings.json`.
+  File and folder selection uses the optional Zenity portal/GTK chooser when
+  available, with Qt Quick dialogs as a fallback.
+- **Wallpaper videos and streams (optional):** Requires the Qt Multimedia QML
+  module and a media backend with codecs/network protocols for the selected
+  source. Video playback loops when possible and supports audio; the library
+  overlay exposes play/pause, seek, mute, and volume controls when the source
+  has audio. Audio-only files can also be selected as wallpapers. The optional
+  `yt-dlp` dependency resolves YouTube page URLs to direct streams; without it,
+  direct media URLs and local files continue to work, but YouTube pages cannot
+  be played. YouTube quality defaults to the highest available video stream,
+  with separate audio when available, and optional maximum-resolution caps;
+  caps fall back to the best available lower resolution. If separate tracks
+  aren't available, it uses the best combined stream. If the module, resolver,
+  or source format is unavailable, the wallpaper falls back to the shell
+  surface color and the library reports the error. On exposed wallpaper areas,
+  two-axis trackpad scrolling pans video and pinching zooms it; a mouse's
+  horizontal wheel pans and vertical wheel zooms.
+- **Wallpaper 3D (optional):** GLB/GLTF assets load through Qt Quick 3D
+  AssetUtils and require the system Assimp importer (`assimp` on Arch); Qt Quick
+  3D `.mesh` assets use the Qt Quick 3D QML module. Custom `.qml` wallpaper
+  scenes can also be chosen or found in wallpaper folders; these run as QML
+  components, so only add trusted scene files. Without the required Qt Quick 3D
+  modules or Assimp importer, ordinary image, video, and color wallpapers
+  remain available and an error is shown for a selected 3D model. On exposed
+  wallpaper areas, two-axis trackpad scrolling orbits a 3D model and pinching
+  zooms it, and twisting during the gesture rolls it. A mouse's horizontal
+  wheel orbits and vertical wheel zooms; hold the right button while scrolling
+  to roll. Alternatively, double-click the model to toggle roll mode, where
+  scrolling in either direction rolls it; double-click again to exit. Models
+  without their own scene background use the current theme surface color.
+- **App-window wallpaper previews (optional):** choose an open app window to
+  show its live preview as the wallpaper, with Pause/Resume controls to hold a
+  still frame. Capturing a window requires compositor support for
+  `hyprland-toplevel-export-v1`; if the window closes or capture is unavailable,
+  the wallpaper falls back to the theme surface.
+- **Wallpaper keyboard shortcut:** In the wallpaper library, record a chord
+  and apply it to check Hyprland's reported binds, then install it through
+  Hyprland's dynamic Lua binding API. The selected chord is persisted in
+  `settings.json`; the binding is unbound on orderly shell shutdown. No
+  Hyprland config module or reload is required. A conflict or failed query
+  leaves the current binding unchanged. The check parses literal and
+  statically-resolvable `hl.bind` expressions from Lua config files as well as
+  consulting the live bind list. Runtime-generated binds that are not
+  represented in source and are omitted from Hyprland's list cannot be found.
 - **Workspace overview (optional):** the [ScrollOverview Hyprland
   plugin](https://github.com/yayuuu/hyprland-scroll-overview) provides the live
   overview opened by right-clicking the workspace pill background. Numbered
@@ -174,6 +240,11 @@ Copyright (C) 2026 mmj2023
 make run        # foreground
 make run-detach # background (daemonized)
 ```
+
+These targets register the shell's desktop entry under
+`$XDG_DATA_HOME/applications` (or `~/.local/share/applications`) so desktop
+portals can resolve its application ID. Run `make install-desktop` separately
+if you launch the shell directly.
 
 or directly:
 
