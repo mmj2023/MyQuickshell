@@ -119,7 +119,11 @@ relative (`:set nu relativenumber`).
   module and a media backend with codecs/network protocols for the selected
   source. Video playback loops when possible and supports audio; the library
   overlay exposes play/pause, seek, mute, and volume controls when the source
-  has audio. Audio-only files can also be selected as wallpapers. The optional
+  has audio. Audio-only files can also be selected as wallpapers. Their
+  playback-synchronized visualizer uses an amplitude envelope decoded from the
+  actual audio. Optional Python 3, `ffmpeg`, and `ffprobe` generate that
+  waveform; without them, audio playback continues but the waveform is
+  unavailable and the library reports the analysis error. The optional
   `yt-dlp` dependency resolves YouTube page URLs to direct streams; without it,
   direct media URLs and local files continue to work, but YouTube pages cannot
   be played. YouTube quality defaults to the highest available video stream,

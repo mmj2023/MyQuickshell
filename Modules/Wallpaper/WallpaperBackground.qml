@@ -24,6 +24,8 @@ PanelWindow {
   function resolveActiveMedia() {
     if (root.sourceType === "video" || root.sourceType === "audio")
       WallpaperService.resolveMediaSource(root.source, root.sourceType, false)
+    if (root.sourceType === "audio")
+      WallpaperService.ensureAudioWaveform(root.source)
   }
 
   Component.onCompleted: root.resolveActiveMedia()

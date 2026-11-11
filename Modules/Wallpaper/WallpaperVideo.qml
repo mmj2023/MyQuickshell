@@ -1,5 +1,6 @@
 import QtQuick
 import QtMultimedia
+import qs.Modules.Wallpaper
 import qs.Services
 
 Item {
@@ -111,6 +112,16 @@ Item {
     anchors.fill: parent
 
     clip: true
+
+    WallpaperAudioVisualizer {
+      anchors.fill: parent
+      z: 1
+      visible: !mediaPlayer.hasVideo && root.hasAudio
+      audioSource: root.mediaSource
+      position: mediaPlayer.position
+      duration: mediaPlayer.duration
+      playing: root.isPlaying
+    }
 
     Video {
       id: mediaPlayer

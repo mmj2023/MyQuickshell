@@ -38,8 +38,8 @@ Item {
     }
 
     function switcher(): string {
-      WallpaperService.openSwitcher(Quickshell.screens[0])
-      return "Opened MyQuickshell wallpaper switcher"
+      WallpaperService.toggleSwitcher(Quickshell.screens[0])
+      return "Toggled MyQuickshell wallpaper switcher"
     }
 
     function close(): string {

@@ -78,7 +78,7 @@ PanelWindow {
 
   Timer {
     id: gifAnimationDelay
-    interval: 700
+    interval: 100
     repeat: false
     onTriggered: root.gifAnimationDelayElapsed = true
   }
@@ -864,33 +864,51 @@ PanelWindow {
                       }
                     }
 
-                    GridView {
+                    Item {
+                      id: directoryItemsViewport
                       width: parent.width
                       height: directoryGroup.groupContentHeight
-                      property int columnCount: 3
-                      cellWidth: width / columnCount
-                      cellHeight: 152
-                      cacheBuffer: cellHeight
-                      model: directoryGroup.collapsed
-                        ? []
-                        : directoryGroup.modelData.items
-                      delegate: wallpaperDelegate
-                      boundsBehavior: Flickable.StopAtBounds
-                      interactive: false
-                      clip: true
-                      visible: !directoryGroup.collapsed && directoryGroup.modelData.items.length > 0
-                    }
+                      readonly property real viewportHeight: Math.min(
+                        height, wallpaperLibrary.height
+                      )
+                      readonly property real scrollOffset: {
+                        const localScroll = wallpaperLibrary.contentY
+                          - mapToItem(wallpaperLibrary.contentItem, 0, 0).y
+                        return Math.max(0, Math.min(
+                          height - viewportHeight, localScroll
+                        ))
+                      }
 
-                    Text {
-                      visible: !directoryGroup.collapsed
-                        && directoryGroup.modelData.items.length === 0
-                      width: parent.width
-                      height: directoryGroup.groupContentHeight
-                      verticalAlignment: Text.AlignVCenter
-                      text: qsTr("No supported media in this folder.")
-                      color: Theme.surfaceVariantText
-                      font.family: Theme.fontFamily
-                      font.pixelSize: Theme.fontSizeSmall
+                      GridView {
+                        width: parent.width
+                        height: directoryItemsViewport.viewportHeight
+                        y: directoryItemsViewport.scrollOffset
+                        contentY: directoryItemsViewport.scrollOffset
+                        property int columnCount: 3
+                        cellWidth: width / columnCount
+                        cellHeight: 152
+                        cacheBuffer: cellHeight
+                        model: directoryGroup.collapsed
+                          ? []
+                          : directoryGroup.modelData.items
+                        delegate: wallpaperDelegate
+                        boundsBehavior: Flickable.StopAtBounds
+                        interactive: false
+                        clip: true
+                        visible: !directoryGroup.collapsed
+                          && directoryGroup.modelData.items.length > 0
+                      }
+
+                      Text {
+                        visible: !directoryGroup.collapsed
+                          && directoryGroup.modelData.items.length === 0
+                        anchors.fill: parent
+                        verticalAlignment: Text.AlignVCenter
+                        text: qsTr("No supported media in this folder.")
+                        color: Theme.surfaceVariantText
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                      }
                     }
                   }
                 }
@@ -1707,7 +1725,7 @@ PanelWindow {
 
             Behavior on opacity {
               NumberAnimation {
-                duration: Theme.shortDuration
+                duration: 100
                 easing.type: Theme.standardEasing
               }
             }

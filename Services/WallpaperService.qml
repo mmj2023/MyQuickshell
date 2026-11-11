@@ -24,6 +24,9 @@ Singleton {
   property var mediaResolutions: ({})
   property var mediaResolverProcesses: ({})
   property int mediaResolveGeneration: 0
+  property var audioWaveforms: ({})
+  property var audioWaveformProcesses: ({})
+  property int audioWaveformGeneration: 0
   property string switcherApplyScope: "global"
   readonly property var toplevels: Hyprland.toplevels?.values || []
   readonly property string videoResolution: SettingsData.wallpaperVideoResolution
@@ -155,9 +158,8 @@ Singleton {
           .sort((a, b) => a.localeCompare(b))
           .filter((path, index, paths) => index === 0 || path !== paths[index - 1])
           .map(path => root.urlForPath(path))
-      }
-      if (root.overlayMode === "overview")
         root.refreshDirectoryGroups()
+      }
 
       if (root.scanPending) {
         root.scanPending = false
@@ -283,6 +285,38 @@ Singleton {
           exitCode,
           mediaResolverOutput.text,
           mediaResolverError.text
+        )
+      }
+    }
+  }
+
+  Component {
+    id: audioWaveformProcessComponent
+
+    Process {
+      id: audioWaveformProcessInstance
+      property string requestSource: ""
+      property int requestGeneration: 0
+      command: []
+
+      stdout: StdioCollector {
+        id: audioWaveformOutput
+        waitForEnd: true
+      }
+
+      stderr: StdioCollector {
+        id: audioWaveformError
+        waitForEnd: true
+      }
+
+      onExited: function(exitCode) {
+        root.finishAudioWaveform(
+          audioWaveformProcessInstance,
+          requestSource,
+          requestGeneration,
+          exitCode,
+          audioWaveformOutput.text,
+          audioWaveformError.text
         )
       }
     }
@@ -510,6 +544,117 @@ Singleton {
     return root.mediaResolutionFor(source)?.audioSource || ""
   }
 
+  function audioWaveformKey(source) {
+    return "$" + String(source)
+  }
+
+  function audioWaveformFor(source) {
+    return root.audioWaveforms[root.audioWaveformKey(source)] || null
+  }
+
+  function updateAudioWaveform(key, waveform) {
+    const waveforms = Object.assign({}, root.audioWaveforms)
+    waveforms[key] = waveform
+    root.audioWaveforms = waveforms
+  }
+
+  function ensureAudioWaveform(source) {
+    const value = String(source || "").trim()
+    if (!value)
+      return
+    const key = root.audioWaveformKey(value)
+    const current = root.audioWaveformFor(value)
+    if (current && current.attempted)
+      return
+
+    const generation = ++root.audioWaveformGeneration
+    root.updateAudioWaveform(key, {
+      source: value,
+      attempted: true,
+      pending: true,
+      generation: generation,
+      samples: []
+    })
+    const process = audioWaveformProcessComponent.createObject(root, {
+      requestSource: value,
+      requestGeneration: generation,
+      command: [
+        "python3",
+        Quickshell.shellDir + "/Services/WallpaperAudioWaveform.py",
+        root.pathFromUrl(value)
+      ]
+    })
+    if (!process) {
+      root.updateAudioWaveform(key, {
+        source: value,
+        attempted: true,
+        pending: false,
+        generation: generation,
+        samples: []
+      })
+      root.error = qsTr("Could not start audio waveform analysis.")
+      return
+    }
+
+    const processes = Object.assign({}, root.audioWaveformProcesses)
+    processes[key] = process
+    root.audioWaveformProcesses = processes
+    process.running = true
+  }
+
+  function finishAudioWaveform(process, source, generation, exitCode, output, errorOutput) {
+    const key = root.audioWaveformKey(source)
+    const processes = Object.assign({}, root.audioWaveformProcesses)
+    if (processes[key] === process) {
+      delete processes[key]
+      root.audioWaveformProcesses = processes
+    }
+    const current = root.audioWaveformFor(source)
+    if (!current || generation !== current.generation) {
+      process.destroy()
+      return
+    }
+
+    let result = null
+    if (exitCode === 0) {
+      try {
+        result = JSON.parse(String(output || ""))
+      } catch (error) {
+        result = null
+      }
+    }
+    const samples = result && Array.isArray(result.samples)
+      ? result.samples.map(value => Math.max(0, Math.min(1, Number(value))))
+        .filter(value => Number.isFinite(value))
+      : []
+    if (exitCode !== 0 || samples.length < 2) {
+      const detail = String(errorOutput || "").trim()
+      root.error = detail
+        ? qsTr("Could not analyze this audio wallpaper: %1").arg(detail)
+        : qsTr("Could not analyze this audio wallpaper. Install optional Python 3, ffmpeg, and ffprobe.")
+      root.updateAudioWaveform(key, {
+        source: source,
+        attempted: true,
+        pending: false,
+        generation: generation,
+        samples: []
+      })
+      process.destroy()
+      return
+    }
+
+    root.updateAudioWaveform(key, {
+      source: source,
+      attempted: true,
+      pending: false,
+      generation: generation,
+      duration: Number(result && result.duration) || 0,
+      samples: samples
+    })
+    root.error = ""
+    process.destroy()
+  }
+
   function stopMediaResolver(key) {
     const processes = Object.assign({}, root.mediaResolverProcesses)
     const process = processes[key]
@@ -723,6 +868,8 @@ Singleton {
     root.error = ""
     if (nextType === "video" || nextType === "audio")
       root.resolveMediaSource(value, nextType, true)
+    if (nextType === "audio")
+      root.ensureAudioWaveform(value)
     if (targetScope === "global" && nextType !== "app") {
       root.appWindow = null
       root.appWindowTitle = ""
@@ -930,7 +1077,6 @@ Singleton {
   function openOverview(screen) {
     if (root.shortcutCaptureActive)
       root.cancelShortcutCapture()
-    root.refreshDirectoryGroups()
     root.overlayScreen = screen || Quickshell.screens[0] || null
     root.overlayMode = "overview"
   }
