@@ -100,10 +100,9 @@ PopupWindow {
         border.width: 1
         border.color: Theme.withAlpha(Theme.outline, 0.18)
 
-        Row {
+        Item {
           anchors.fill: parent
           anchors.margins: Theme.spaceL
-          spacing: Theme.spaceL
 
           Row {
             width: heroCard.width * 0.38
