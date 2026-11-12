@@ -1354,7 +1354,10 @@ Singleton {
       root.error = qsTr("Choose an available app window.")
       return false
     }
-    return root.addLayer(String(item.address).toLowerCase(), "app", scope, screen)
+    if (!root.addLayer(String(item.address).toLowerCase(), "app", scope, screen))
+      return false
+    root.appPreviewPaused = false
+    return true
   }
 
   function appWindowForSource(source) {

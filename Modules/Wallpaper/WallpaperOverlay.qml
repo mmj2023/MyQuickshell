@@ -1473,7 +1473,7 @@ PanelWindow {
           Text {
             id: appPickerDescription
             width: parent.width
-            text: qsTr("Select an open window to use as a live wallpaper.")
+            text: qsTr("Click a window to replace the target, or use Add layer to stack it.")
             color: Theme.surfaceVariantText
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
@@ -1507,7 +1507,7 @@ PanelWindow {
                   anchors.verticalCenter: parent.verticalCenter
                   height: implicitHeight
                   anchors.leftMargin: Theme.spaceS
-                  anchors.rightMargin: Theme.spaceS + 38
+                  anchors.rightMargin: addAppWindowLayerButton.width + Theme.spaceS
                   spacing: Theme.spaceXS
 
                   Text {
@@ -1533,6 +1533,7 @@ PanelWindow {
                 MouseArea {
                   id: appWindowMouse
                   anchors.fill: parent
+                  anchors.rightMargin: addAppWindowLayerButton.width + Theme.spaceS
                   hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor
                   onClicked: {
@@ -1544,18 +1545,19 @@ PanelWindow {
                 }
 
                 ActionButton {
-                  width: 32
-                  height: 32
+                  id: addAppWindowLayerButton
+                  width: 84
+                  height: 36
                   anchors.right: parent.right
                   anchors.rightMargin: Theme.spaceXS
                   anchors.verticalCenter: parent.verticalCenter
-                  label: "+"
+                  label: qsTr("Add layer")
                   emphasized: true
                   onClicked: {
-                      if (WallpaperService.addAppWindowLayer(
-                        modelData, SettingsData.wallpaperApplyScope, root.targetScreen
-                      ))
-                        root.appPickerOpen = false
+                    if (WallpaperService.addAppWindowLayer(
+                      parent.modelData, SettingsData.wallpaperApplyScope, root.targetScreen
+                    ))
+                      root.appPickerOpen = false
                   }
                 }
               }
