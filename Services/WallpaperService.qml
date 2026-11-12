@@ -15,12 +15,15 @@ Singleton {
 
   property var items: []
   property var directoryGroups: []
+  property int nextWallpaperLayerId: 0
   property string error: ""
   property string overlayMode: ""
   property var overlayScreen: null
   property var scanCommand: []
   property bool scanPending: false
   property var mediaController: null
+  property string mediaControllerSource: ""
+  property var layerMediaControllers: ({})
   property var mediaResolutions: ({})
   property var mediaResolverProcesses: ({})
   property int mediaResolveGeneration: 0
@@ -65,8 +68,8 @@ Singleton {
 
   readonly property string hyprlandConfigPath:
     StandardPaths.writableLocation(StandardPaths.ConfigLocation) + "/hypr"
-  readonly property string source: SettingsData.wallpaperSource
-  readonly property string type: SettingsData.wallpaperType
+  readonly property string source: root.sourceForTarget("global", null)
+  readonly property string type: root.typeForTarget("global", null)
   readonly property var directories: SettingsData.wallpaperDirectories
   function refreshDirectoryGroups() {
     const paths = root.directories
@@ -106,6 +109,7 @@ Singleton {
 
   Component.onCompleted: {
     Qt.callLater(scanDirectories)
+    Qt.callLater(root.initializeWallpaperStacks)
     Qt.callLater(root.restoreConfiguredShortcut)
     Qt.callLater(root.restoreAppWindow)
     Qt.callLater(root.restoreMediaSource)
@@ -119,8 +123,18 @@ Singleton {
   Connections {
     target: SettingsData
     function onSettingsApplied() {
+      root.initializeWallpaperStacks()
+      root.refreshMediaControllers()
       root.restoreConfiguredShortcut()
       root.restoreAppWindow()
+      root.restoreMediaSource()
+    }
+  }
+
+  Connections {
+    target: SettingsData
+    function onWallpaperStacksChanged() {
+      root.refreshMediaControllers()
       root.restoreMediaSource()
     }
   }
@@ -426,24 +440,299 @@ Singleton {
     return workspace ? monitor + " · " + workspace : qsTr("No active workspace")
   }
 
-  function overrideForScreen(screen) {
-    const key = root.workspaceKeyForScreen(screen)
-    const overrides = SettingsData.wallpaperWorkspaceOverrides || ({})
-    return key ? overrides[key] || null : null
+  function monitorKeyForScreen(screen) {
+    return String(screen?.name || "")
+  }
+
+  function newWallpaperLayerId() {
+    root.nextWallpaperLayerId += 1
+    return "wallpaper-layer-" + Date.now().toString(36)
+      + "-" + root.nextWallpaperLayerId
+  }
+
+  function makeWallpaperLayer(source, type, id, opacity) {
+    const value = String(source || "")
+    return {
+      id: id || root.newWallpaperLayerId(),
+      source: value,
+      type: type || root.typeForSource(value),
+      opacity: Number.isFinite(Number(opacity))
+        ? Math.max(0, Math.min(1, Number(opacity))) : 1
+    }
+  }
+
+  function cloneWallpaperStack(stack) {
+    if (!stack || !Array.isArray(stack.layers))
+      return { layers: [], controlLayerId: "" }
+    return {
+      layers: stack.layers.map(layer => root.makeWallpaperLayer(
+        layer.source, layer.type, layer.id, layer.opacity
+      )),
+      controlLayerId: String(stack.controlLayerId || "")
+    }
+  }
+
+  function validWallpaperStack(stack) {
+    return !!stack && Array.isArray(stack.layers)
+  }
+
+  function initializeWallpaperStacks() {
+    if (!SettingsData._hasLoaded)
+      return false
+    const current = SettingsData.wallpaperStacks || ({})
+    if (Number(current.schemaVersion) >= 1)
+      return true
+
+    const legacyOverrides = SettingsData.wallpaperWorkspaceOverrides || ({})
+    const workspaces = {}
+    Object.keys(legacyOverrides).forEach(key => {
+      const value = legacyOverrides[key]
+      if (root.validWallpaperStack(value)) {
+        workspaces[key] = root.cloneWallpaperStack(value)
+      } else if (value && value.source) {
+        workspaces[key] = {
+          layers: [root.makeWallpaperLayer(
+            value.source, value.type, "legacy-workspace-" + key, 1
+          )],
+          controlLayerId: ""
+        }
+      }
+    })
+
+    const globalSource = String(SettingsData.wallpaperSource || "")
+    const globalStack = globalSource ? {
+      layers: [root.makeWallpaperLayer(
+        globalSource, SettingsData.wallpaperType, "legacy-global", 1
+      )],
+      controlLayerId: ""
+    } : { layers: [], controlLayerId: "" }
+    const stacks = {
+      schemaVersion: 1,
+      global: globalStack,
+      monitors: {},
+      workspaces: workspaces
+    }
+    if (!SettingsData.setMany({ wallpaperStacks: stacks })) {
+      root.error = qsTr("Could not migrate wallpaper settings to layer stacks.")
+      return false
+    }
+    return true
+  }
+
+  function addLayer(source, type, scope, screen) {
+    const value = String(source || "").trim()
+    if (!value) {
+      root.error = qsTr("Choose a wallpaper source first.")
+      return false
+    }
+    const targetScope = scope === "workspace" || scope === "monitor"
+      ? scope : "global"
+    const stack = root.cloneWallpaperStack(
+      root.stackForScope(targetScope, screen || root.overlayScreen)
+    )
+    const nextType = type || root.typeForSource(value)
+    stack.layers.push(root.makeWallpaperLayer(value, nextType))
+    if (!root.storeWallpaperStack(targetScope, screen || root.overlayScreen, stack))
+      return false
+    if (nextType === "video" || nextType === "audio")
+      root.resolveMediaSource(value, nextType, true)
+    if (nextType === "audio")
+      root.ensureAudioWaveform(value)
+    return true
+  }
+
+  function removeLayer(layerId, scope, screen) {
+    const targetScope = scope === "workspace" || scope === "monitor"
+      ? scope : "global"
+    const stack = root.cloneWallpaperStack(
+      root.stackForScope(targetScope, screen || root.overlayScreen)
+    )
+    const index = stack.layers.findIndex(layer => layer.id === layerId)
+    if (index < 0)
+      return false
+    stack.layers.splice(index, 1)
+    if (stack.controlLayerId === layerId)
+      stack.controlLayerId = ""
+    return root.storeWallpaperStack(targetScope, screen || root.overlayScreen, stack)
+  }
+
+  function moveLayer(layerId, offset, scope, screen) {
+    const targetScope = scope === "workspace" || scope === "monitor"
+      ? scope : "global"
+    const stack = root.cloneWallpaperStack(
+      root.stackForScope(targetScope, screen || root.overlayScreen)
+    )
+    const index = stack.layers.findIndex(layer => layer.id === layerId)
+    const destination = index + Math.sign(Number(offset) || 0)
+    if (index < 0 || destination < 0 || destination >= stack.layers.length)
+      return false
+    const layer = stack.layers.splice(index, 1)[0]
+    stack.layers.splice(destination, 0, layer)
+    return root.storeWallpaperStack(targetScope, screen || root.overlayScreen, stack)
+  }
+
+  function setLayerOpacity(layerId, opacity, scope, screen) {
+    const targetScope = scope === "workspace" || scope === "monitor"
+      ? scope : "global"
+    const stack = root.cloneWallpaperStack(
+      root.stackForScope(targetScope, screen || root.overlayScreen)
+    )
+    const layer = stack.layers.find(candidate => candidate.id === layerId)
+    if (!layer)
+      return false
+    layer.opacity = Math.max(0, Math.min(1, Number(opacity)))
+    return root.storeWallpaperStack(targetScope, screen || root.overlayScreen, stack)
+  }
+
+  function setControlLayer(layerId, scope, screen) {
+    const targetScope = scope === "workspace" || scope === "monitor"
+      ? scope : "global"
+    const stack = root.cloneWallpaperStack(
+      root.stackForScope(targetScope, screen || root.overlayScreen)
+    )
+    if (layerId && !stack.layers.some(layer => layer.id === layerId))
+      return false
+    stack.controlLayerId = String(layerId || "")
+    return root.storeWallpaperStack(targetScope, screen || root.overlayScreen, stack)
+  }
+
+  function explicitWallpaperStack(scope, screen) {
+    const stacks = SettingsData.wallpaperStacks || ({})
+    if (scope === "global")
+      return root.validWallpaperStack(stacks.global) ? stacks.global : null
+    if (scope === "monitor") {
+      const key = root.monitorKeyForScreen(screen)
+      const stack = key ? stacks.monitors?.[key] : null
+      return root.validWallpaperStack(stack) ? stack : null
+    }
+    if (scope === "workspace") {
+      const key = root.workspaceKeyForScreen(screen)
+      const stack = key ? stacks.workspaces?.[key] : null
+      return root.validWallpaperStack(stack) ? stack : null
+    }
+    return null
+  }
+
+  function stackForScope(scope, screen) {
+    const globalStack = root.explicitWallpaperStack("global", screen)
+      || (String(SettingsData.wallpaperSource || "")
+        ? { layers: [root.makeWallpaperLayer(
+          SettingsData.wallpaperSource, SettingsData.wallpaperType,
+          "legacy-global", 1
+        )], controlLayerId: "" }
+        : { layers: [], controlLayerId: "" })
+    if (scope === "global")
+      return globalStack
+
+    const monitorStack = root.explicitWallpaperStack("monitor", screen)
+    if (scope === "monitor")
+      return monitorStack || globalStack
+
+    return root.explicitWallpaperStack("workspace", screen)
+      || monitorStack || globalStack
+  }
+
+  function effectiveStackForScreen(screen) {
+    return root.stackForScope("workspace", screen)
+  }
+
+  function allWallpaperLayers() {
+    const stacks = SettingsData.wallpaperStacks || ({})
+    const allStacks = [stacks.global]
+      .concat(Object.values(stacks.monitors || ({})))
+      .concat(Object.values(stacks.workspaces || ({})))
+    const layers = []
+    allStacks.forEach(stack => {
+      if (Array.isArray(stack?.layers))
+        layers.push(...stack.layers)
+    })
+    return layers
+  }
+
+  function layersForTarget(scope, screen) {
+    return root.stackForScope(scope || "global", screen).layers
+  }
+
+  function stackOriginForScreen(screen) {
+    if (root.explicitWallpaperStack("workspace", screen))
+      return "workspace"
+    if (root.explicitWallpaperStack("monitor", screen))
+      return "monitor"
+    return "global"
+  }
+
+  function targetLabelForScope(scope, screen) {
+    if (scope === "workspace")
+      return qsTr("Workspace target: %1").arg(root.workspaceLabelForScreen(screen))
+    if (scope === "monitor")
+      return qsTr("Monitor target: %1").arg(root.monitorKeyForScreen(screen))
+    return qsTr("All monitors")
   }
 
   function hasWorkspaceOverrideForScreen(screen) {
-    const override = root.overrideForScreen(screen)
-    return !!(override && override.source)
+    return !!root.explicitWallpaperStack("workspace", screen)
+  }
+
+  function hasMonitorOverrideForScreen(screen) {
+    return !!root.explicitWallpaperStack("monitor", screen)
+  }
+
+  function storeWallpaperStack(scope, screen, stack) {
+    const stacks = Object.assign({}, SettingsData.wallpaperStacks || ({}))
+    const value = root.cloneWallpaperStack(stack)
+    if (scope === "global") {
+      stacks.global = value
+    } else if (scope === "monitor") {
+      const monitor = root.monitorKeyForScreen(screen)
+      if (!monitor) {
+        root.error = qsTr("There is no active monitor for this wallpaper.")
+        return false
+      }
+      stacks.monitors = Object.assign({}, stacks.monitors || ({}))
+      stacks.monitors[monitor] = value
+    } else if (scope === "workspace") {
+      const workspace = root.workspaceKeyForScreen(screen)
+      if (!workspace) {
+        root.error = qsTr("There is no active workspace on this monitor.")
+        return false
+      }
+      stacks.workspaces = Object.assign({}, stacks.workspaces || ({}))
+      stacks.workspaces[workspace] = value
+    } else {
+      return false
+    }
+    stacks.schemaVersion = 1
+    if (!SettingsData.setMany({ wallpaperStacks: stacks })) {
+      root.error = qsTr("Wallpaper settings are not ready yet.")
+      return false
+    }
+    root.error = ""
+    return true
   }
 
   function clearWorkspaceOverride(screen) {
     const key = root.workspaceKeyForScreen(screen)
     if (!key || !root.hasWorkspaceOverrideForScreen(screen))
       return false
-    const overrides = Object.assign({}, SettingsData.wallpaperWorkspaceOverrides || ({}))
-    delete overrides[key]
-    if (!SettingsData.setMany({ wallpaperWorkspaceOverrides: overrides })) {
+    const stacks = Object.assign({}, SettingsData.wallpaperStacks || ({}))
+    stacks.workspaces = Object.assign({}, stacks.workspaces || ({}))
+    delete stacks.workspaces[key]
+    if (!SettingsData.setMany({ wallpaperStacks: stacks })) {
+      root.error = qsTr("Wallpaper settings are not ready yet.")
+      return false
+    }
+    root.error = ""
+    return true
+  }
+
+  function clearMonitorOverride(screen) {
+    const key = root.monitorKeyForScreen(screen)
+    if (!key || !root.hasMonitorOverrideForScreen(screen))
+      return false
+    const stacks = Object.assign({}, SettingsData.wallpaperStacks || ({}))
+    stacks.monitors = Object.assign({}, stacks.monitors || ({}))
+    delete stacks.monitors[key]
+    if (!SettingsData.setMany({ wallpaperStacks: stacks })) {
       root.error = qsTr("Wallpaper settings are not ready yet.")
       return false
     }
@@ -452,26 +741,119 @@ Singleton {
   }
 
   function sourceForTarget(scope, screen) {
-    const override = scope === "workspace" ? root.overrideForScreen(screen) : null
-    return override?.source || root.source
+    const layers = root.stackForScope(scope || "global", screen).layers
+    return layers.length > 0 ? layers[layers.length - 1].source : ""
   }
 
   function typeForTarget(scope, screen) {
-    const override = scope === "workspace" ? root.overrideForScreen(screen) : null
-    return override?.type || root.type
+    const layers = root.stackForScope(scope || "global", screen).layers
+    return layers.length > 0 ? layers[layers.length - 1].type : "color"
   }
 
-  function isMediaAudioOwner(screen) {
-    const owner = Array.from(Quickshell.screens || []).find(candidate => {
-      const type = root.typeForTarget("workspace", candidate)
-      return type === "video" || type === "audio"
-    })
-    return !!owner && owner === screen
+  function mediaControllerKey(screen, layerId) {
+    const monitor = root.monitorKeyForScreen(screen)
+    return monitor && layerId ? monitor + "::" + String(layerId) : ""
+  }
+
+  function mediaControllerForLayer(screen, layerId) {
+    const key = root.mediaControllerKey(screen, layerId)
+    return key ? root.layerMediaControllers[key] || null : null
+  }
+
+  function registerMediaController(controller, screen, layerId) {
+    const key = root.mediaControllerKey(screen, layerId)
+    if (!key)
+      return
+    const controllers = Object.assign({}, root.layerMediaControllers)
+    controllers[key] = controller
+    root.layerMediaControllers = controllers
+    root.refreshMediaControllers()
+  }
+
+  function unregisterMediaController(controller, screen, layerId) {
+    const key = root.mediaControllerKey(screen, layerId)
+    if (!key || root.layerMediaControllers[key] !== controller)
+      return
+    const controllers = Object.assign({}, root.layerMediaControllers)
+    delete controllers[key]
+    root.layerMediaControllers = controllers
+    root.refreshMediaControllers()
+  }
+
+  function audioControllerForScreen(screen) {
+    const layers = root.effectiveStackForScreen(screen).layers
+    const preferredIndex = layers.findIndex(layer =>
+      layer.id === root.effectiveStackForScreen(screen).controlLayerId
+    )
+    if (preferredIndex >= 0) {
+      const preferred = root.mediaControllerForLayer(screen, layers[preferredIndex].id)
+      if (preferred && preferred.hasAudio)
+        return preferred
+      for (let index = preferredIndex - 1; index >= 0; index--) {
+        const controller = root.mediaControllerForLayer(screen, layers[index].id)
+        if (controller && controller.hasAudio)
+          return controller
+      }
+    }
+    for (let index = layers.length - 1; index >= 0; index--) {
+      const controller = root.mediaControllerForLayer(screen, layers[index].id)
+      if (controller && controller.hasAudio)
+        return controller
+    }
+    return null
+  }
+
+  function refreshMediaControllers() {
+    let active = null
+    for (const screen of Array.from(Quickshell.screens || [])) {
+      active = root.audioControllerForScreen(screen)
+      if (active)
+        break
+    }
+    const source = active
+      ? String(active.sessionSource || active.mediaSource || "") : ""
+    if (root.mediaController === active && root.mediaControllerSource === source)
+      return
+    if (root.mediaController && root.mediaController !== active
+        && typeof root.mediaController.savePlaybackState === "function")
+      root.mediaController.savePlaybackState()
+    root.mediaController = active
+    root.mediaControllerSource = source
+    if (!active)
+      return
+    const state = root.mediaStateForSource(source)
+    root.restoringMediaSettings = true
+    root.mediaMuted = state ? !!state.muted : false
+    root.mediaVolume = state && Number.isFinite(Number(state.volume))
+      ? Math.max(0, Math.min(1, Number(state.volume))) : 0.45
+    root.restoringMediaSettings = false
+  }
+
+  function isMediaAudioOwner(screen, layerId) {
+    return root.mediaController !== null
+      && root.mediaController === root.mediaControllerForLayer(screen, layerId)
+  }
+
+  function scrollLayerIdForScreen(screen) {
+    const stack = root.effectiveStackForScreen(screen)
+    const layers = stack.layers
+    const preferredIndex = layers.findIndex(layer => layer.id === stack.controlLayerId)
+    const start = preferredIndex >= 0 ? preferredIndex : layers.length - 1
+    for (let index = start; index >= 0; index--) {
+      const controller = root.mediaControllerForLayer(screen, layers[index].id)
+      if (controller && controller.supportsScroll)
+        return layers[index].id
+    }
+    return ""
   }
 
   function setDefaultApplyScope(scope) {
-    if (scope !== "global" && scope !== "workspace")
+    if (scope !== "global" && scope !== "monitor" && scope !== "workspace")
       return false
+    if (scope === "monitor" && !root.monitorKeyForScreen(root.overlayScreen)) {
+      root.error = qsTr("There is no active monitor for this wallpaper.")
+      return false
+    }
     if (scope === "workspace" && !root.workspaceKeyForScreen(root.overlayScreen)) {
       root.error = qsTr("There is no active workspace on this monitor.")
       return false
@@ -485,8 +867,12 @@ Singleton {
   }
 
   function setSwitcherApplyScope(scope) {
-    if (scope !== "global" && scope !== "workspace")
+    if (scope !== "global" && scope !== "monitor" && scope !== "workspace")
       return false
+    if (scope === "monitor" && !root.monitorKeyForScreen(root.overlayScreen)) {
+      root.error = qsTr("There is no active monitor for this wallpaper.")
+      return false
+    }
     if (scope === "workspace" && !root.workspaceKeyForScreen(root.overlayScreen)) {
       root.error = qsTr("There is no active workspace on this monitor.")
       return false
@@ -497,7 +883,9 @@ Singleton {
   }
 
   function toggleSwitcherApplyScope() {
-    const next = root.switcherApplyScope === "global" ? "workspace" : "global"
+    const scopes = ["global", "monitor", "workspace"]
+    const index = scopes.indexOf(root.switcherApplyScope)
+    const next = scopes[(index + 1) % scopes.length]
     return root.setSwitcherApplyScope(next)
   }
 
@@ -519,8 +907,10 @@ Singleton {
     const sources = Object.keys(root.mediaResolutions)
       .map(key => root.mediaResolutions[key]?.source || "")
       .filter(source => source.length > 0)
-    if (root.requiresYouTubeExtraction(root.source))
-      sources.push(root.source)
+    root.allWallpaperLayers().forEach(layer => {
+      if (layer.type === "video" && root.requiresYouTubeExtraction(layer.source))
+        sources.push(layer.source)
+    })
     sources.filter((source, index) => sources.indexOf(source) === index)
       .forEach(source => root.resolveMediaSource(source, "video", true))
     return true
@@ -539,8 +929,19 @@ Singleton {
   }
 
   function restoreMediaSource() {
-    if (root.type === "video" || root.type === "audio")
-      root.resolveMediaSource(root.source, root.type, false)
+    const sources = []
+    root.allWallpaperLayers().forEach(layer => {
+      if ((layer.type === "video" || layer.type === "audio")
+          && layer.source && sources.indexOf(layer.source) < 0)
+        sources.push(layer.source)
+    })
+    sources.forEach(source => {
+      const layer = root.allWallpaperLayers().find(item => item.source === source)
+      const type = layer?.type || root.typeForSource(source)
+      root.resolveMediaSource(source, type, false)
+      if (type === "audio")
+        root.ensureAudioWaveform(source)
+    })
   }
 
   function mediaResolutionKey(source) {
@@ -578,16 +979,87 @@ Singleton {
     return states[root.mediaStateKey(source)] || null
   }
 
-  function isMediaPlaybackOwner(screen, source) {
+  function wallpaperModelStateKey(screen, layerId) {
+    const monitor = root.monitorKeyForScreen(screen)
+    return monitor && layerId ? "$" + monitor + "::" + String(layerId) : ""
+  }
+
+  function normalizedModelAngle(value) {
+    const angle = Number(value)
+    return Number.isFinite(angle) ? ((angle % 360) + 360) % 360 : 0
+  }
+
+  function wallpaperModelStateForLayer(screen, layerId) {
+    const key = root.wallpaperModelStateKey(screen, layerId)
+    const states = SettingsData.wallpaperModelStates || ({})
+    const state = key ? states[key] : null
+    if (!state)
+      return null
+
+    const yaw = Number(state.yaw)
+    const pitch = Number(state.pitch)
+    const roll = Number(state.roll)
+    const zoom = Number(state.zoom)
+    if (![yaw, pitch, roll, zoom].every(Number.isFinite))
+      return null
+    return {
+      yaw: root.normalizedModelAngle(yaw),
+      pitch: Math.max(-85, Math.min(85, pitch)),
+      roll: root.normalizedModelAngle(roll),
+      zoom: Math.max(0.3, Math.min(3, zoom))
+    }
+  }
+
+  function saveWallpaperModelState(screen, layerId, state) {
+    const key = root.wallpaperModelStateKey(screen, layerId)
+    if (!key || !state)
+      return false
+
+    const states = SettingsData.wallpaperModelStates || ({})
+    const yaw = root.normalizedModelAngle(state.yaw)
+    const pitchValue = Number(state.pitch)
+    const roll = root.normalizedModelAngle(state.roll)
+    const zoomValue = Number(state.zoom)
+    const next = {
+      yaw: Math.round(yaw * 1000) / 1000,
+      pitch: Math.round(Math.max(-85, Math.min(85,
+        Number.isFinite(pitchValue) ? pitchValue : 0)) * 1000) / 1000,
+      roll: Math.round(roll * 1000) / 1000,
+      zoom: Math.round(Math.max(0.3, Math.min(3,
+        Number.isFinite(zoomValue) ? zoomValue : 1)) * 1000) / 1000
+    }
+    const previous = states[key]
+    if (previous
+        && Math.abs(root.normalizedModelAngle(previous.yaw) - next.yaw) < 0.001
+        && Math.abs(Number(previous.pitch) - next.pitch) < 0.001
+        && Math.abs(root.normalizedModelAngle(previous.roll) - next.roll) < 0.001
+        && Math.abs(Number(previous.zoom) - next.zoom) < 0.001)
+      return true
+
+    const updated = Object.assign({}, states)
+    updated[key] = next
+    if (!SettingsData.setMany({ wallpaperModelStates: updated })) {
+      root.error = qsTr("Could not save 3D wallpaper view settings.")
+      return false
+    }
+    return true
+  }
+
+  function isMediaPlaybackOwner(screen, layerId) {
+    const controller = root.mediaControllerForLayer(screen, layerId)
+    if (!controller)
+      return false
+    const source = controller.sessionSource || controller.mediaSource
     const target = root.mediaStateKey(source)
-    const owner = Array.from(Quickshell.screens || []).find(candidate => {
-      const type = root.typeForTarget("workspace", candidate)
-      return (type === "video" || type === "audio")
-        && root.mediaStateKey(
-          root.sourceForTarget("workspace", candidate)
-        ) === target
-    })
-    return owner === screen
+    for (const candidateScreen of Array.from(Quickshell.screens || [])) {
+      for (const layer of root.effectiveStackForScreen(candidateScreen).layers) {
+        const candidate = root.mediaControllerForLayer(candidateScreen, layer.id)
+        if (candidate
+            && root.mediaStateKey(candidate.sessionSource || candidate.mediaSource) === target)
+          return candidate === controller
+      }
+    }
+    return false
   }
 
   function saveMediaPlaybackState(source, position, playing, muted, volume) {
@@ -877,6 +1349,14 @@ Singleton {
     return true
   }
 
+  function addAppWindowLayer(item, scope, screen) {
+    if (!item?.window || !item.address) {
+      root.error = qsTr("Choose an available app window.")
+      return false
+    }
+    return root.addLayer(String(item.address).toLowerCase(), "app", scope, screen)
+  }
+
   function appWindowForSource(source) {
     const address = String(source || "").toLowerCase()
     if (!address)
@@ -926,28 +1406,13 @@ Singleton {
     }
 
     const nextType = type || root.typeForSource(value)
-    const targetScope = scope === "workspace" ? "workspace" : "global"
-    let updated = false
-    if (targetScope === "workspace") {
-      const key = root.workspaceKeyForScreen(screen || root.overlayScreen)
-      if (!key) {
-        root.error = qsTr("There is no active workspace on this monitor.")
-        return false
-      }
-      const overrides = Object.assign({}, SettingsData.wallpaperWorkspaceOverrides || ({}))
-      overrides[key] = { source: value, type: nextType }
-      updated = SettingsData.setMany({ wallpaperWorkspaceOverrides: overrides })
-    } else {
-      updated = SettingsData.setMany({
-        wallpaperSource: value,
-        wallpaperType: nextType
-      })
-    }
-    if (!updated) {
-      root.error = qsTr("Wallpaper settings are not ready yet.")
+    const targetScope = scope === "workspace" || scope === "monitor"
+      ? scope : "global"
+    if (!root.storeWallpaperStack(targetScope, screen || root.overlayScreen, {
+      layers: [root.makeWallpaperLayer(value, nextType)],
+      controlLayerId: ""
+    }))
       return false
-    }
-    root.error = ""
     if (nextType === "video" || nextType === "audio")
       root.resolveMediaSource(value, nextType, true)
     if (nextType === "audio")
@@ -960,12 +1425,14 @@ Singleton {
     return true
   }
 
-  function setColor(color, scope, screen) {
+  function setColor(color, scope, screen, addAsLayer) {
     const value = String(color || "").trim()
     if (!/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value)) {
       root.error = qsTr("Enter a color as #RGB or #RRGGBB.")
       return false
     }
+    if (addAsLayer)
+      return root.addLayer(value, "color", scope, screen)
     return root.setSource(value, "color", scope, screen)
   }
 
@@ -1040,13 +1507,6 @@ Singleton {
     scanProcess.running = true
   }
 
-  function applyItem(index, scope, screen) {
-    if (index < 0 || index >= root.items.length)
-      return false
-    const source = root.items[index]
-    return root.setSource(source, root.typeForSource(source), scope, screen)
-  }
-
   function applySwitcherItem(index, scope, screen) {
     const targetScope = scope || root.switcherApplyScope
     const targetScreen = screen || root.overlayScreen
@@ -1101,28 +1561,6 @@ Singleton {
         : root.items[index])
     }
     return result
-  }
-
-  function registerMediaController(controller) {
-    if (root.mediaController && root.mediaController !== controller
-        && typeof root.mediaController.savePlaybackState === "function")
-      root.mediaController.savePlaybackState()
-
-    root.mediaController = controller
-    const state = root.mediaStateForSource(controller.mediaSource)
-    root.restoringMediaSettings = true
-    root.mediaMuted = state ? !!state.muted : false
-    root.mediaVolume = state && Number.isFinite(Number(state.volume))
-      ? Math.max(0, Math.min(1, Number(state.volume))) : 0.45
-    root.restoringMediaSettings = false
-  }
-
-  function unregisterMediaController(controller) {
-    if (root.mediaController === controller) {
-      if (typeof controller.savePlaybackState === "function")
-        controller.savePlaybackState()
-      root.mediaController = null
-    }
   }
 
   function toggleMediaPlayback() {
@@ -1180,9 +1618,12 @@ Singleton {
     if (root.shortcutCaptureActive)
       root.cancelShortcutCapture()
     root.overlayScreen = screen || Quickshell.screens[0] || null
-    root.switcherApplyScope = SettingsData.wallpaperApplyScope === "workspace"
-      && root.workspaceKeyForScreen(root.overlayScreen)
-      ? "workspace" : "global"
+    const savedScope = SettingsData.wallpaperApplyScope
+    root.switcherApplyScope = savedScope === "workspace"
+        && root.workspaceKeyForScreen(root.overlayScreen)
+      ? "workspace"
+      : savedScope === "monitor" && root.monitorKeyForScreen(root.overlayScreen)
+        ? "monitor" : "global"
     root.overlayMode = "switcher"
   }
 
@@ -1199,8 +1640,8 @@ Singleton {
     root.cancelShortcutCapture()
   }
 
-  function chooseMediaFile(screen, scope) {
-    root.beginChooser("media", screen, scope)
+  function chooseMediaFile(screen, scope, addAsLayer) {
+    root.beginChooser(addAsLayer ? "media-layer" : "media", screen, scope)
   }
 
   function chooseDirectory(screen) {
@@ -1209,7 +1650,8 @@ Singleton {
 
   function beginChooser(operation, screen, scope) {
     const target = screen || root.overlayScreen || Quickshell.screens[0] || null
-    const targetScope = scope === "workspace" ? "workspace" : "global"
+    const targetScope = scope === "workspace" || scope === "monitor"
+      ? scope : "global"
     root.overlayScreen = target
     root.closeOverlay()
     Qt.callLater(function() {
@@ -1227,15 +1669,16 @@ Singleton {
     if (!process)
       return false
 
+    const isMediaOperation = operation === "media" || operation === "media-layer"
     const command = stage === "portal"
       ? ["env", "GTK_USE_PORTAL=1", "zenity", "--file-selection"]
       : ["zenity", "--file-selection"]
     if (operation === "directory")
       command.push("--directory")
-    command.push("--title=" + (operation === "media"
+    command.push("--title=" + (isMediaOperation
       ? qsTr("Choose wallpaper media")
       : qsTr("Add a wallpaper folder")))
-    if (operation === "media") {
+    if (isMediaOperation) {
       command.push(
         "--filename=" + StandardPaths.writableLocation(StandardPaths.PicturesLocation) + "/",
         "--file-filter=" + qsTr("Wallpapers and media")
@@ -1252,11 +1695,15 @@ Singleton {
     const selectedPath = String(output || "").trim()
     if (exitCode === 0 && selectedPath.length > 0) {
       const path = root.pathFromUrl(selectedPath)
-      if (request.operation === "media")
-        root.setSource(root.urlForPath(path), root.typeForSource(path),
-          request.scope, request.screen)
-      else
+      if (request.operation === "media" || request.operation === "media-layer") {
+        const source = root.urlForPath(path)
+        if (request.operation === "media-layer")
+          root.addLayer(source, root.typeForSource(path), request.scope, request.screen)
+        else
+          root.setSource(source, root.typeForSource(path), request.scope, request.screen)
+      } else {
         root.addDirectory(path)
+      }
       root.openOverview(request.screen)
       return
     }

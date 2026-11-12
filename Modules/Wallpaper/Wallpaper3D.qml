@@ -8,10 +8,15 @@ Item {
   id: root
 
   property url modelSource: ""
+  property string layerId: ""
+  property var targetScreen: null
   property real modelYaw: 0
   property real modelPitch: 0
   property real modelRoll: 0
   property real zoomFactor: 1
+  property bool modelStateRestored: false
+  property bool restoringModelState: false
+  property bool modelStateDirty: false
   property real pinchStartZoom: 1
   property real pinchStartRoll: 0
   property bool rollMode: false
@@ -34,11 +39,71 @@ Item {
     root.modelRoll += delta * 0.35
   }
 
-  onModelSourceChanged: {
-    root.modelYaw = 0
-    root.modelPitch = 0
-    root.modelRoll = 0
-    root.zoomFactor = 1
+  function restoreModelState() {
+    if (!root.layerId || !root.targetScreen)
+      return false
+    const state = WallpaperService.wallpaperModelStateForLayer(
+      root.targetScreen, root.layerId
+    )
+    root.restoringModelState = true
+    root.modelStateDirty = false
+    root.modelYaw = state ? state.yaw : 0
+    root.modelPitch = state ? state.pitch : 0
+    root.modelRoll = state ? state.roll : 0
+    root.zoomFactor = state ? state.zoom : 1
+    root.modelStateRestored = true
+    root.restoringModelState = false
+    return true
+  }
+
+  function saveModelState() {
+    if (!root.modelStateRestored || root.restoringModelState
+        || !root.layerId || !root.targetScreen || !root.modelStateDirty)
+      return false
+    modelStateSaveTimer.stop()
+    const saved = WallpaperService.saveWallpaperModelState(root.targetScreen,
+      root.layerId, {
+        yaw: root.modelYaw,
+        pitch: root.modelPitch,
+        roll: root.modelRoll,
+        zoom: root.zoomFactor
+      })
+    if (saved)
+      root.modelStateDirty = false
+    return saved
+  }
+
+  function scheduleModelStateSave() {
+    if (root.modelStateRestored && !root.restoringModelState) {
+      root.modelStateDirty = true
+      modelStateSaveTimer.restart()
+    }
+  }
+
+  onLayerIdChanged: {
+    modelStateSaveTimer.stop()
+    root.modelStateRestored = false
+    root.modelStateDirty = false
+    root.restoreModelState()
+  }
+  onTargetScreenChanged: {
+    modelStateSaveTimer.stop()
+    root.modelStateRestored = false
+    root.modelStateDirty = false
+    root.restoreModelState()
+  }
+  onModelYawChanged: root.scheduleModelStateSave()
+  onModelPitchChanged: root.scheduleModelStateSave()
+  onModelRollChanged: root.scheduleModelStateSave()
+  onZoomFactorChanged: root.scheduleModelStateSave()
+
+  Component.onDestruction: root.saveModelState()
+
+  Timer {
+    id: modelStateSaveTimer
+    interval: 250
+    repeat: false
+    onTriggered: root.saveModelState()
   }
 
   QtObject {
@@ -61,8 +126,7 @@ Item {
   View3D {
     anchors.fill: parent
     environment: SceneEnvironment {
-      backgroundMode: SceneEnvironment.Color
-      clearColor: Theme.surface
+      backgroundMode: SceneEnvironment.Transparent
     }
 
     PerspectiveCamera {

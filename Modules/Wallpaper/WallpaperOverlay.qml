@@ -14,6 +14,7 @@ PanelWindow {
   property var targetScreen: null
   property bool chooserOpen: false
   property bool appPickerOpen: false
+  property bool chooserAddLayer: false
   property string chooserScope: "global"
   property bool gifAnimationDelayElapsed: false
   property var collapsedDirectories: []
@@ -174,7 +175,9 @@ PanelWindow {
             }
 
             Text {
-              text: root.selectedScope + " · " + root.selectedType + " · "
+              text: WallpaperService.targetLabelForScope(
+                root.selectedScope, root.targetScreen
+              ) + " · " + root.selectedType + " · "
                 + root.selectedSource
               width: parent.width
               color: Theme.surfaceVariantText
@@ -275,14 +278,22 @@ PanelWindow {
                 spacing: Theme.spaceXS
 
                 ActionButton {
-                  width: (parent.width - parent.spacing) / 2
+                  width: (parent.width - parent.spacing * 2) / 3
                   label: qsTr("Global")
                   emphasized: SettingsData.wallpaperApplyScope === "global"
                   onClicked: WallpaperService.setDefaultApplyScope("global")
                 }
 
                 ActionButton {
-                  width: (parent.width - parent.spacing) / 2
+                  width: (parent.width - parent.spacing * 2) / 3
+                  label: qsTr("Monitor")
+                  emphasized: SettingsData.wallpaperApplyScope === "monitor"
+                  enabled: WallpaperService.monitorKeyForScreen(root.targetScreen).length > 0
+                  onClicked: WallpaperService.setDefaultApplyScope("monitor")
+                }
+
+                ActionButton {
+                  width: (parent.width - parent.spacing * 2) / 3
                   label: qsTr("Workspace")
                   emphasized: SettingsData.wallpaperApplyScope === "workspace"
                   enabled: WallpaperService.workspaceKeyForScreen(root.targetScreen).length > 0
@@ -292,8 +303,8 @@ PanelWindow {
 
               Text {
                 width: parent.width
-                text: qsTr("Workspace target: %1").arg(
-                  WallpaperService.workspaceLabelForScreen(root.targetScreen)
+                text: WallpaperService.targetLabelForScope(
+                  root.selectedScope, root.targetScreen
                 )
                 color: Theme.surfaceVariantText
                 font.family: Theme.fontFamily
@@ -303,9 +314,20 @@ PanelWindow {
 
               ActionButton {
                 width: parent.width
-                visible: WallpaperService.hasWorkspaceOverrideForScreen(root.targetScreen)
-                label: qsTr("Use global wallpaper for this workspace")
+                visible: root.selectedScope === "workspace"
+                  && WallpaperService.hasWorkspaceOverrideForScreen(root.targetScreen)
+                label: WallpaperService.hasMonitorOverrideForScreen(root.targetScreen)
+                  ? qsTr("Use monitor wallpaper for this workspace")
+                  : qsTr("Use global wallpaper for this workspace")
                 onClicked: WallpaperService.clearWorkspaceOverride(root.targetScreen)
+              }
+
+              ActionButton {
+                width: parent.width
+                visible: root.selectedScope === "monitor"
+                  && WallpaperService.hasMonitorOverrideForScreen(root.targetScreen)
+                label: qsTr("Use global wallpaper on this monitor")
+                onClicked: WallpaperService.clearMonitorOverride(root.targetScreen)
               }
 
               Row {
@@ -371,6 +393,14 @@ PanelWindow {
 
               ActionButton {
                 width: parent.width
+                label: qsTr("Add media file as a layer…")
+                onClicked: WallpaperService.chooseMediaFile(
+                  root.targetScreen, SettingsData.wallpaperApplyScope, true
+                )
+              }
+
+              ActionButton {
+                width: parent.width
                 label: root.selectedType === "app"
                   ? qsTr("Change app preview…")
                   : qsTr("Use app preview…")
@@ -409,7 +439,8 @@ PanelWindow {
                 spacing: Theme.spaceXS
 
                 Rectangle {
-                  width: parent.width - colorButton.width - Theme.spaceXS
+                  width: parent.width - colorButton.width - addColorLayerButton.width
+                    - Theme.spaceXS * 2
                   height: parent.height
                   radius: Theme.hoverRadius
                   color: Theme.surfaceContainerHigh
@@ -433,7 +464,7 @@ PanelWindow {
 
                 Rectangle {
                   id: colorButton
-                  width: 86
+                  width: 64
                   height: parent.height
                   radius: Theme.hoverRadius
                   color: Theme.withAlpha(Theme.primary, 0.16)
@@ -451,6 +482,29 @@ PanelWindow {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: WallpaperService.setColor(colorInput.text,
                       SettingsData.wallpaperApplyScope, root.targetScreen)
+                  }
+                }
+
+                Rectangle {
+                  id: addColorLayerButton
+                  width: 46
+                  height: parent.height
+                  radius: Theme.hoverRadius
+                  color: Theme.withAlpha(Theme.primary, 0.1)
+
+                  Text {
+                    anchors.centerIn: parent
+                    text: "+"
+                    color: Theme.surfaceText
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeMedium
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: WallpaperService.setColor(colorInput.text,
+                      SettingsData.wallpaperApplyScope, root.targetScreen, true)
                   }
                 }
               }
@@ -497,6 +551,12 @@ PanelWindow {
                 width: parent.width
                 label: qsTr("Use URL as video/stream")
                 onClicked: applyUrl()
+              }
+
+              ActionButton {
+                width: parent.width
+                label: qsTr("Add URL as a layer")
+                onClicked: applyUrl(true)
               }
 
               Text {
@@ -739,10 +799,253 @@ PanelWindow {
               }
             }
 
+            Rectangle {
+              id: layerGraph
+              width: parent.width
+              height: 178
+              visible: root.overviewMode
+              radius: Theme.cornerRadius
+              color: Theme.withAlpha(Theme.surfaceContainer, 0.72)
+              border.width: 1
+              border.color: Theme.withAlpha(Theme.outlineVariant, 0.55)
+
+              Column {
+                anchors.fill: parent
+                anchors.margins: Theme.spaceS
+                spacing: Theme.spaceXS
+
+                Row {
+                  width: parent.width
+                  height: 22
+                  spacing: Theme.spaceS
+
+                  Text {
+                    width: parent.width - layerOrderHint.width - parent.spacing
+                    text: qsTr("Wallpaper layers")
+                    color: Theme.surfaceText
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                    font.weight: Font.DemiBold
+                  }
+
+                  Text {
+                    id: layerOrderHint
+                    text: qsTr("Bottom → top")
+                    color: Theme.surfaceVariantText
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                  }
+                }
+
+                ListView {
+                  id: layerList
+                  width: parent.width
+                  height: parent.height - 22 - parent.spacing
+                  orientation: ListView.Horizontal
+                  spacing: Theme.spaceS
+                  clip: true
+                  boundsBehavior: Flickable.StopAtBounds
+                  model: WallpaperService.layersForTarget(
+                    root.selectedScope, root.targetScreen
+                  )
+
+                  delegate: Item {
+                    required property var modelData
+                    required property int index
+                    width: 264
+                    height: layerList.height
+
+                    Rectangle {
+                      anchors.fill: parent
+                      radius: Theme.cornerRadius
+                      color: Theme.withAlpha(Theme.surfaceContainerHigh, 0.92)
+                      border.width: 1
+                      border.color: Theme.withAlpha(Theme.outlineVariant, 0.65)
+                      clip: true
+
+                      Rectangle {
+                        id: layerPreview
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: Theme.spaceXS
+                        height: 62
+                        radius: Theme.hoverRadius
+                        color: modelData.type === "color"
+                          ? Qt.color(modelData.source)
+                          : Theme.surfaceContainer
+                        clip: true
+
+                        Image {
+                          anchors.fill: parent
+                          visible: modelData.type === "image"
+                          source: visible ? modelData.source : ""
+                          fillMode: Image.PreserveAspectCrop
+                          sourceSize: Qt.size(420, 120)
+                          asynchronous: true
+                          cache: true
+                        }
+
+                        Text {
+                          anchors.centerIn: parent
+                          visible: modelData.type !== "image"
+                            && modelData.type !== "color"
+                          text: String(modelData.type).toUpperCase()
+                          color: Theme.surfaceText
+                          font.family: Theme.fontFamily
+                          font.pixelSize: Theme.fontSizeSmall
+                          font.weight: Font.DemiBold
+                        }
+
+                        Text {
+                          anchors.left: parent.left
+                          anchors.top: parent.top
+                          anchors.margins: Theme.spaceXS
+                          text: index === layerList.count - 1
+                            ? qsTr("TOP")
+                            : qsTr("LAYER %1").arg(index + 1)
+                          color: Theme.surfaceText
+                          font.family: Theme.fontFamily
+                          font.pixelSize: Theme.fontSizeSmall - 1
+                          font.weight: Font.DemiBold
+                        }
+                      }
+
+                      Text {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: layerPreview.bottom
+                        anchors.leftMargin: Theme.spaceS
+                        anchors.rightMargin: Theme.spaceS
+                        anchors.topMargin: Theme.spaceXS
+                        height: 18
+                        text: String(modelData.source).split("/").pop()
+                        color: Theme.surfaceText
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                        elide: Text.ElideMiddle
+                      }
+
+                      Row {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.margins: Theme.spaceXS
+                        spacing: Theme.spaceXS
+                        height: 28
+
+                        ActionButton {
+                          width: 24
+                          height: parent.height
+                          label: "↑"
+                          enabled: index < layerList.count - 1
+                          onClicked: WallpaperService.moveLayer(
+                            modelData.id, 1, root.selectedScope, root.targetScreen
+                          )
+                        }
+
+                        ActionButton {
+                          width: 24
+                          height: parent.height
+                          label: "↓"
+                          enabled: index > 0
+                          onClicked: WallpaperService.moveLayer(
+                            modelData.id, -1, root.selectedScope, root.targetScreen
+                          )
+                        }
+
+                        ActionButton {
+                          width: 56
+                          height: parent.height
+                          label: WallpaperService.stackForScope(
+                            root.selectedScope, root.targetScreen
+                          ).controlLayerId === modelData.id
+                            ? qsTr("Preferred")
+                            : qsTr("Controls")
+                          emphasized: WallpaperService.stackForScope(
+                            root.selectedScope, root.targetScreen
+                          ).controlLayerId === modelData.id
+                          onClicked: WallpaperService.setControlLayer(
+                            WallpaperService.stackForScope(
+                              root.selectedScope, root.targetScreen
+                            ).controlLayerId === modelData.id ? "" : modelData.id,
+                            root.selectedScope, root.targetScreen
+                          )
+                        }
+
+                        ActionButton {
+                          width: 24
+                          height: parent.height
+                          label: "−"
+                          onClicked: WallpaperService.setLayerOpacity(
+                            modelData.id, Math.max(0, modelData.opacity - 0.1),
+                            root.selectedScope, root.targetScreen
+                          )
+                        }
+
+                        Text {
+                          width: 38
+                          height: parent.height
+                          verticalAlignment: Text.AlignVCenter
+                          horizontalAlignment: Text.AlignHCenter
+                          text: Math.round(modelData.opacity * 100) + "%"
+                          color: Theme.surfaceVariantText
+                          font.family: Theme.monoFontFamily
+                          font.pixelSize: Theme.fontSizeSmall
+                        }
+
+                        ActionButton {
+                          width: 24
+                          height: parent.height
+                          label: "+"
+                          onClicked: WallpaperService.setLayerOpacity(
+                            modelData.id, Math.min(1, modelData.opacity + 0.1),
+                            root.selectedScope, root.targetScreen
+                          )
+                        }
+
+                        ActionButton {
+                          width: 24
+                          height: parent.height
+                          label: "×"
+                          onClicked: WallpaperService.removeLayer(
+                            modelData.id, root.selectedScope, root.targetScreen
+                          )
+                        }
+                      }
+
+                      Text {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 30
+                        horizontalAlignment: Text.AlignHCenter
+                        text: WallpaperService.scrollLayerIdForScreen(root.targetScreen)
+                          === modelData.id ? qsTr("Active control layer") : ""
+                        color: Theme.primary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall - 1
+                      }
+                    }
+                  }
+                }
+              }
+
+              Text {
+                anchors.centerIn: parent
+                visible: layerList.count === 0
+                text: qsTr("No layers in this target. Choose a wallpaper below.")
+                color: Theme.surfaceVariantText
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+              }
+            }
+
             Flickable {
               id: wallpaperLibrary
               width: parent.width
-              height: parent.height - parent.spacing - 32
+              height: parent.height - 32 - parent.spacing
+                - (layerGraph.visible ? layerGraph.height + parent.spacing : 0)
               contentWidth: width
               contentHeight: wallpaperGroups.implicitHeight
               clip: true
@@ -1204,7 +1507,7 @@ PanelWindow {
                   anchors.verticalCenter: parent.verticalCenter
                   height: implicitHeight
                   anchors.leftMargin: Theme.spaceS
-                  anchors.rightMargin: Theme.spaceS
+                  anchors.rightMargin: Theme.spaceS + 38
                   spacing: Theme.spaceXS
 
                   Text {
@@ -1237,6 +1540,22 @@ PanelWindow {
                       modelData, SettingsData.wallpaperApplyScope, root.targetScreen
                     ))
                       root.appPickerOpen = false
+                  }
+                }
+
+                ActionButton {
+                  width: 32
+                  height: 32
+                  anchors.right: parent.right
+                  anchors.rightMargin: Theme.spaceXS
+                  anchors.verticalCenter: parent.verticalCenter
+                  label: "+"
+                  emphasized: true
+                  onClicked: {
+                      if (WallpaperService.addAppWindowLayer(
+                        modelData, SettingsData.wallpaperApplyScope, root.targetScreen
+                      ))
+                        root.appPickerOpen = false
                   }
                 }
               }
@@ -1360,6 +1679,10 @@ PanelWindow {
           if (quickSwitcher.visible)
             quickSwitcher.refreshSelection()
         }
+        function onWallpaperStacksChanged() {
+          if (quickSwitcher.visible)
+            quickSwitcher.refreshSelection()
+        }
       }
 
       WheelHandler {
@@ -1410,9 +1733,9 @@ PanelWindow {
           verticalAlignment: Text.AlignVCenter
           horizontalAlignment: Text.AlignHCenter
           text: qsTr("Apply to: %1  ·  Shift toggles").arg(
-            WallpaperService.switcherApplyScope === "workspace"
-              ? qsTr("Workspace")
-              : qsTr("Global")
+            WallpaperService.targetLabelForScope(
+              WallpaperService.switcherApplyScope, root.targetScreen
+            )
           )
           color: Theme.surfaceText
           font.family: Theme.fontFamily
@@ -1449,7 +1772,7 @@ PanelWindow {
           spacing: Theme.spaceXS
 
           Repeater {
-            model: ["global", "workspace"]
+            model: ["global", "monitor", "workspace"]
 
             delegate: Rectangle {
               required property string modelData
@@ -1461,8 +1784,11 @@ PanelWindow {
                 : WallpaperService.switcherApplyScope === modelData
                   ? Theme.withAlpha(Theme.primary, 0.12)
                   : "transparent"
-              opacity: modelData !== "workspace"
-                || WallpaperService.workspaceKeyForScreen(root.targetScreen).length > 0
+              opacity: modelData === "global"
+                || (modelData === "monitor"
+                  && WallpaperService.monitorKeyForScreen(root.targetScreen).length > 0)
+                || (modelData === "workspace"
+                  && WallpaperService.workspaceKeyForScreen(root.targetScreen).length > 0)
                 ? 1 : 0.55
 
               Text {
@@ -1470,11 +1796,9 @@ PanelWindow {
                 anchors.leftMargin: Theme.spaceS
                 anchors.rightMargin: Theme.spaceS
                 verticalAlignment: Text.AlignVCenter
-                text: modelData === "workspace"
-                  ? qsTr("Current workspace · %1").arg(
-                    WallpaperService.workspaceLabelForScreen(root.targetScreen)
-                  )
-                  : qsTr("Global wallpaper")
+                text: WallpaperService.targetLabelForScope(
+                  modelData, root.targetScreen
+                )
                 color: Theme.surfaceText
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
@@ -1484,8 +1808,11 @@ PanelWindow {
               MouseArea {
                 id: switcherScopeRowMouse
                 anchors.fill: parent
-                enabled: modelData !== "workspace"
-                  || WallpaperService.workspaceKeyForScreen(root.targetScreen).length > 0
+                enabled: modelData === "global"
+                  || (modelData === "monitor"
+                    && WallpaperService.monitorKeyForScreen(root.targetScreen).length > 0)
+                  || (modelData === "workspace"
+                    && WallpaperService.workspaceKeyForScreen(root.targetScreen).length > 0)
                 hoverEnabled: true
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: {
@@ -1670,6 +1997,9 @@ PanelWindow {
         width: GridView.view.cellWidth
         height: GridView.view.cellHeight
         property bool previewActivated: false
+        readonly property bool selectedInStack: WallpaperService.layersForTarget(
+          root.selectedScope, root.targetScreen
+        ).some(layer => layer.source === modelData)
         readonly property bool previewNearViewport: {
           const itemTop = mapToItem(wallpaperLibrary.contentItem, 0, 0).y
           const scrollTop = wallpaperLibrary.contentY
@@ -1690,20 +2020,14 @@ PanelWindow {
           anchors.fill: parent
           anchors.margins: Theme.spaceXS
           radius: Theme.cornerRadius
-          color: WallpaperService.sourceForTarget(
-            root.selectedScope, root.targetScreen
-          ) === modelData
+          color: parent.parent.selectedInStack
             ? Theme.withAlpha(Theme.primary, 0.22)
             : Theme.withAlpha(
               Theme.widgetBaseBackgroundColor,
               SettingsData.barWidgetTransparency
             )
-          border.width: WallpaperService.sourceForTarget(
-            root.selectedScope, root.targetScreen
-          ) === modelData ? 2 : 1
-          border.color: WallpaperService.sourceForTarget(
-            root.selectedScope, root.targetScreen
-          ) === modelData
+          border.width: parent.parent.selectedInStack ? 2 : 1
+          border.color: parent.parent.selectedInStack
             ? Theme.primary
             : Theme.withAlpha(Theme.outlineVariant, 0.65)
           clip: true
@@ -1750,11 +2074,26 @@ PanelWindow {
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: {
-              WallpaperService.applyItem(index,
+              WallpaperService.setSource(modelData, undefined,
                 SettingsData.wallpaperApplyScope, root.targetScreen)
               if (!root.overviewMode)
                 WallpaperService.closeOverlay()
             }
+          }
+
+          ActionButton {
+            visible: root.overviewMode
+            width: 32
+            height: 32
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.margins: Theme.spaceS
+            label: "+"
+            emphasized: true
+            onClicked: WallpaperService.addLayer(
+              parent.parent.modelData, undefined,
+              SettingsData.wallpaperApplyScope, root.targetScreen
+            )
           }
         }
       }
@@ -1827,11 +2166,19 @@ PanelWindow {
       qsTr("All files (*)")
     ]
     onAccepted: {
-      WallpaperService.setSource(selectedFile.toString(), undefined,
-        root.chooserScope, root.targetScreen)
+      if (root.chooserAddLayer)
+        WallpaperService.addLayer(selectedFile.toString(), undefined,
+          root.chooserScope, root.targetScreen)
+      else
+        WallpaperService.setSource(selectedFile.toString(), undefined,
+          root.chooserScope, root.targetScreen)
       root.chooserOpen = false
+      root.chooserAddLayer = false
     }
-    onRejected: root.chooserOpen = false
+    onRejected: {
+      root.chooserOpen = false
+      root.chooserAddLayer = false
+    }
   }
 
   FolderDialog {
@@ -1853,9 +2200,10 @@ PanelWindow {
       if (screen !== root.targetScreen)
         return
       root.chooserScope = scope
+      root.chooserAddLayer = operation === "media-layer"
       root.chooserOpen = true
       Qt.callLater(function() {
-        if (operation === "media")
+        if (operation === "media" || operation === "media-layer")
           mediaDialog.open()
         else
           folderDialog.open()
@@ -1863,13 +2211,17 @@ PanelWindow {
     }
   }
 
-  function applyUrl() {
+  function applyUrl(addAsLayer) {
     const url = urlInput.text.trim()
     if (!/^https?:\/\//i.test(url)) {
       WallpaperService.error = qsTr("Enter a valid http or https media URL.")
       return
     }
-    WallpaperService.setSource(url, "video",
-      SettingsData.wallpaperApplyScope, root.targetScreen)
+    if (addAsLayer)
+      WallpaperService.addLayer(url, "video",
+        SettingsData.wallpaperApplyScope, root.targetScreen)
+    else
+      WallpaperService.setSource(url, "video",
+        SettingsData.wallpaperApplyScope, root.targetScreen)
   }
 }

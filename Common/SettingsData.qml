@@ -72,7 +72,9 @@ Singleton {
   property string wallpaperType: "color"
   property string wallpaperApplyScope: "global"
   property var wallpaperWorkspaceOverrides: ({})
+  property var wallpaperStacks: ({})
   property var wallpaperMediaStates: ({})
+  property var wallpaperModelStates: ({})
   property string wallpaperVideoResolution: "best"
   property var wallpaperDirectories: []
   property bool wallpaperCycleEnabled: false

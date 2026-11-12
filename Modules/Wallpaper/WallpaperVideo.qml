@@ -8,12 +8,18 @@ Item {
 
   property url mediaSource: ""
   property var targetScreen: null
+  property string layerId: ""
+  property bool scrollControlsEnabled: false
   property string sessionSource: ""
+  property var registeredScreen: null
+  property string registeredLayerId: ""
   property bool playbackStateRestored: false
   property bool restoringPlaybackState: false
   property int pendingRestorePosition: -1
   property bool restoreSeekRequested: false
-  readonly property bool audioOwner: WallpaperService.isMediaAudioOwner(root.targetScreen)
+  readonly property bool audioOwner: WallpaperService.isMediaAudioOwner(
+    root.targetScreen, root.layerId
+  )
   property real zoomFactor: 1
   property real horizontalOffset: 0
   property real verticalOffset: 0
@@ -23,6 +29,7 @@ Item {
   readonly property bool hasSeparateAudio:
     WallpaperService.mediaAudioSourceFor(root.mediaSource).length > 0
   readonly property bool hasAudio: root.hasSeparateAudio || mediaPlayer.hasAudio
+  readonly property bool supportsScroll: mediaPlayer.hasVideo
   readonly property bool isPlaying: mediaPlayer.playbackState === MediaPlayer.PlayingState
   readonly property bool seekable: mediaPlayer.seekable
   readonly property int position: mediaPlayer.position
@@ -159,10 +166,21 @@ Item {
   }
 
   function updateAudioRegistration() {
-    if (root.audioOwner)
-      WallpaperService.registerMediaController(root)
-    else
-      WallpaperService.unregisterMediaController(root)
+    if (root.registeredScreen === root.targetScreen
+        && root.registeredLayerId === root.layerId) {
+      WallpaperService.refreshMediaControllers()
+      return
+    }
+    if (root.registeredScreen && root.registeredLayerId)
+      WallpaperService.unregisterMediaController(
+        root, root.registeredScreen, root.registeredLayerId
+      )
+    root.registeredScreen = root.targetScreen
+    root.registeredLayerId = root.layerId
+    if (root.registeredScreen && root.registeredLayerId)
+      WallpaperService.registerMediaController(
+        root, root.registeredScreen, root.registeredLayerId
+      )
   }
 
   Component.onCompleted: {
@@ -172,13 +190,20 @@ Item {
   }
   Component.onDestruction: {
     root.savePlaybackState()
-    WallpaperService.unregisterMediaController(root)
+    if (root.registeredScreen && root.registeredLayerId)
+      WallpaperService.unregisterMediaController(
+        root, root.registeredScreen, root.registeredLayerId
+      )
   }
   onAudioOwnerChanged: {
-    root.updateAudioRegistration()
     root.syncSeparateAudio()
   }
+  onHasAudioChanged: WallpaperService.refreshMediaControllers()
+  onSupportsScrollChanged: WallpaperService.refreshMediaControllers()
+  onLayerIdChanged: root.updateAudioRegistration()
+  onTargetScreenChanged: root.updateAudioRegistration()
   onMediaSourceChanged: {
+    root.savePlaybackState()
     restoreSettleTimer.stop()
     seekSaveTimer.stop()
     root.sessionSource = String(root.mediaSource)
@@ -282,7 +307,7 @@ Item {
     repeat: true
     running: root.playbackStateRestored && root.isPlaying
       && root.pendingRestorePosition < 0
-      && WallpaperService.isMediaPlaybackOwner(root.targetScreen, root.sessionSource)
+      && WallpaperService.isMediaPlaybackOwner(root.targetScreen, root.layerId)
     onTriggered: root.savePlaybackState()
   }
 
@@ -294,6 +319,7 @@ Item {
   }
 
   WheelHandler {
+    enabled: root.scrollControlsEnabled && mediaPlayer.hasVideo
     orientation: Qt.Horizontal
     acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
     target: null
@@ -308,6 +334,7 @@ Item {
   }
 
   WheelHandler {
+    enabled: root.scrollControlsEnabled && mediaPlayer.hasVideo
     orientation: Qt.Vertical
     acceptedDevices: PointerDevice.TouchPad
     target: null
@@ -322,6 +349,7 @@ Item {
   }
 
   WheelHandler {
+    enabled: root.scrollControlsEnabled && mediaPlayer.hasVideo
     orientation: Qt.Vertical
     acceptedDevices: PointerDevice.Mouse
     target: null
@@ -336,6 +364,7 @@ Item {
   }
 
   TapHandler {
+    enabled: root.scrollControlsEnabled && mediaPlayer.hasVideo
     acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad | PointerDevice.TouchScreen
     acceptedButtons: Qt.LeftButton
     onDoubleTapped: root.resetVideoView()
@@ -343,6 +372,7 @@ Item {
 
   PinchHandler {
     id: pinchHandler
+    enabled: root.scrollControlsEnabled && mediaPlayer.hasVideo
     acceptedDevices: PointerDevice.TouchPad | PointerDevice.TouchScreen
     target: null
     onActiveChanged: {
