@@ -8,6 +8,11 @@ Item {
 
   property url mediaSource: ""
   property var targetScreen: null
+  property string sessionSource: ""
+  property bool playbackStateRestored: false
+  property bool restoringPlaybackState: false
+  property int pendingRestorePosition: -1
+  property bool restoreSeekRequested: false
   readonly property bool audioOwner: WallpaperService.isMediaAudioOwner(root.targetScreen)
   property real zoomFactor: 1
   property real horizontalOffset: 0
@@ -65,11 +70,73 @@ Item {
     root.syncSeparateAudio()
   }
 
+  function restorePlaybackState() {
+    if (mediaPlayer.mediaStatus !== MediaPlayer.LoadedMedia
+        && mediaPlayer.mediaStatus !== MediaPlayer.BufferedMedia)
+      return
+
+    if (!root.playbackStateRestored) {
+      const state = WallpaperService.mediaStateForSource(root.mediaSource)
+      const position = state ? Math.max(0, Number(state.position) || 0) : 0
+      root.pendingRestorePosition = position > 0 ? position : -1
+      root.restoreSeekRequested = false
+      root.playbackStateRestored = true
+      root.restoringPlaybackState = true
+      if (root.pendingRestorePosition >= 0 && mediaPlayer.seekable) {
+        mediaPlayer.position = root.pendingRestorePosition
+        root.restoreSeekRequested = true
+      }
+      if (state && state.playing === false)
+        mediaPlayer.pause()
+      else
+        mediaPlayer.play()
+      root.restoringPlaybackState = false
+    }
+
+    if (root.pendingRestorePosition >= 0 && mediaPlayer.seekable
+        && !root.restoreSeekRequested) {
+      root.restoringPlaybackState = true
+      mediaPlayer.position = root.pendingRestorePosition
+      root.restoreSeekRequested = true
+      root.restoringPlaybackState = false
+    }
+
+    if (root.pendingRestorePosition >= 0 && root.restoreSeekRequested)
+      restoreSettleTimer.restart()
+    root.syncSeparateAudio()
+  }
+
+  function savePlaybackState() {
+    const source = root.sessionSource || String(root.mediaSource)
+    if (!source)
+      return false
+
+    const savedState = WallpaperService.mediaStateForSource(source)
+    const canReadPlayerState = root.playbackStateRestored
+      && !root.restoringPlaybackState
+    const canReadPosition = canReadPlayerState && root.pendingRestorePosition < 0
+    const muted = root.audioOwner && source === String(root.mediaSource)
+      ? WallpaperService.mediaMuted
+      : savedState ? !!savedState.muted : false
+    const volume = root.audioOwner && source === String(root.mediaSource)
+      ? WallpaperService.mediaVolume
+      : savedState && Number.isFinite(Number(savedState.volume))
+        ? Number(savedState.volume) : 0.45
+    return WallpaperService.saveMediaPlaybackState(
+      source,
+      canReadPosition ? mediaPlayer.position : savedState?.position || 0,
+      canReadPlayerState ? root.isPlaying : savedState?.playing !== false,
+      muted,
+      volume
+    )
+  }
+
   function seekTo(position) {
     if (root.seekable)
-      mediaPlayer.seek(position)
+      mediaPlayer.position = position
     if (root.hasSeparateAudio && separateAudioPlayer.seekable)
-      separateAudioPlayer.seek(position)
+      separateAudioPlayer.position = position
+    seekSaveTimer.restart()
   }
 
   function syncSeparateAudio() {
@@ -81,7 +148,7 @@ Item {
     if (mediaPlayer.playbackState === MediaPlayer.PlayingState) {
       if (separateAudioPlayer.seekable
           && Math.abs(separateAudioPlayer.position - mediaPlayer.position) > 500) {
-        separateAudioPlayer.seek(mediaPlayer.position)
+        separateAudioPlayer.position = mediaPlayer.position
       }
       separateAudioPlayer.play()
     } else if (mediaPlayer.playbackState === MediaPlayer.PausedState) {
@@ -98,14 +165,28 @@ Item {
       WallpaperService.unregisterMediaController(root)
   }
 
-  Component.onCompleted: root.updateAudioRegistration()
-  Component.onDestruction: WallpaperService.unregisterMediaController(root)
+  Component.onCompleted: {
+    if (!root.sessionSource)
+      root.sessionSource = String(root.mediaSource)
+    root.updateAudioRegistration()
+  }
+  Component.onDestruction: {
+    root.savePlaybackState()
+    WallpaperService.unregisterMediaController(root)
+  }
   onAudioOwnerChanged: {
     root.updateAudioRegistration()
     root.syncSeparateAudio()
   }
   onMediaSourceChanged: {
+    restoreSettleTimer.stop()
+    seekSaveTimer.stop()
+    root.sessionSource = String(root.mediaSource)
+    root.playbackStateRestored = false
+    root.pendingRestorePosition = -1
+    root.restoreSeekRequested = false
     root.resetVideoView()
+    root.updateAudioRegistration()
   }
 
   Item {
@@ -123,20 +204,33 @@ Item {
       playing: root.isPlaying
     }
 
-    Video {
-      id: mediaPlayer
+    VideoOutput {
+      id: videoOutput
       width: parent.width * root.zoomFactor
       height: parent.height * root.zoomFactor
       x: (parent.width - width) / 2 + root.horizontalOffset
       y: (parent.height - height) / 2 + root.verticalOffset
-      source: WallpaperService.mediaVideoSourceFor(root.mediaSource)
       fillMode: VideoOutput.PreserveAspectCrop
+      visible: mediaPlayer.hasVideo
+    }
+
+    MediaPlayer {
+      id: mediaPlayer
+      source: WallpaperService.mediaVideoSourceFor(root.mediaSource)
+      videoOutput: videoOutput
       loops: MediaPlayer.Infinite
-      autoPlay: true
-      visible: hasVideo
-      muted: !root.audioOwner || WallpaperService.mediaMuted || root.hasSeparateAudio
-      volume: WallpaperService.mediaVolume
-      onPlaybackStateChanged: root.syncSeparateAudio()
+      autoPlay: false
+      audioOutput: AudioOutput {
+        muted: !root.audioOwner || WallpaperService.mediaMuted || root.hasSeparateAudio
+        volume: WallpaperService.mediaVolume
+      }
+      onMediaStatusChanged: root.restorePlaybackState()
+      onSeekableChanged: root.restorePlaybackState()
+      onPlaybackStateChanged: {
+        root.syncSeparateAudio()
+        if (!root.restoringPlaybackState)
+          root.savePlaybackState()
+      }
       onErrorOccurred: function(error, errorString) {
         WallpaperService.error = qsTr("Could not play this media or stream: ") + errorString
       }
@@ -166,10 +260,37 @@ Item {
   }
 
   Timer {
+    id: restoreSettleTimer
+    interval: 1000
+    repeat: false
+    onTriggered: {
+      root.pendingRestorePosition = -1
+      root.restoreSeekRequested = false
+      root.savePlaybackState()
+    }
+  }
+
+  Timer {
     interval: 2000
     repeat: true
     running: root.hasSeparateAudio && root.audioOwner && root.isPlaying
     onTriggered: root.syncSeparateAudio()
+  }
+
+  Timer {
+    interval: 2000
+    repeat: true
+    running: root.playbackStateRestored && root.isPlaying
+      && root.pendingRestorePosition < 0
+      && WallpaperService.isMediaPlaybackOwner(root.targetScreen, root.sessionSource)
+    onTriggered: root.savePlaybackState()
+  }
+
+  Timer {
+    id: seekSaveTimer
+    interval: 250
+    repeat: false
+    onTriggered: root.savePlaybackState()
   }
 
   WheelHandler {

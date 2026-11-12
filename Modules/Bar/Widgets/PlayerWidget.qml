@@ -45,7 +45,14 @@ BasePill {
   readonly property real overviewX: root.parentScreen
     ? Math.max(16, Math.min(root.parentScreen.width - root.overviewWidth - 16, root.popupX - root.overviewWidth / 2))
     : root.popupX - root.overviewWidth / 2
-  readonly property var players: Mpris.players ? Mpris.players.values : []
+  readonly property bool wallpaperPlayerAvailable: !!WallpaperService.mediaController
+    && WallpaperService.mediaHasAudio
+  readonly property var players: {
+    const connectedPlayers = Mpris.players ? Mpris.players.values : []
+    return root.wallpaperPlayerAvailable
+      ? connectedPlayers.concat([wallpaperPlayer])
+      : connectedPlayers
+  }
   readonly property var audioSinks: Pipewire.nodes ? Pipewire.nodes.values.filter(node => node.audio && node.isSink && !node.isStream) : []
   readonly property var player: root.activePlayer()
   readonly property string baseArtworkUrl: root.resolveArtworkUrl(root.player)
@@ -64,12 +71,39 @@ BasePill {
   property real displayedPosition: root.player ? root.player.position : 0
   property var visualizerLevels: [0.35, 0.7, 0.5, 0.85, 0.4]
 
-  Component.onCompleted: LyricsService.setPlayer(root.player)
-  onPlayerChanged: LyricsService.setPlayer(root.player)
+  Component.onCompleted: root.updateLyricsPlayer()
+  onPlayerChanged: {
+    root.updateLyricsPlayer()
+    root.displayedPosition = root.player ? root.player.position : 0
+  }
   onBaseArtworkUrlChanged: root.useArtworkFallback = false
   onLyricsAvailableChanged: {
     if (!root.lyricsAvailable)
       root.lyricsOpen = false
+  }
+
+  QtObject {
+    id: wallpaperPlayer
+
+    readonly property string identity: "MyQuickshell Wallpaper"
+    readonly property string trackTitle: root.wallpaperTrackTitle()
+    readonly property string trackArtist: "Wallpaper"
+    readonly property string trackAlbum: "MyQuickshell"
+    readonly property string trackArtUrl: ""
+    readonly property var metadata: ({})
+    readonly property bool isPlaying: WallpaperService.mediaIsPlaying
+    readonly property real position: WallpaperService.mediaPosition / 1000
+    readonly property real length: WallpaperService.mediaDuration / 1000
+    readonly property bool positionSupported: WallpaperService.mediaSeekable
+    readonly property bool volumeSupported: true
+    readonly property real volume: WallpaperService.mediaVolume
+    readonly property bool canGoPrevious: false
+    readonly property bool canGoNext: false
+    readonly property bool canTogglePlaying: !!WallpaperService.mediaController
+
+    function togglePlaying() {
+      WallpaperService.toggleMediaPlayback()
+    }
   }
 
   function resolveArtworkUrl(player) {
@@ -196,7 +230,7 @@ BasePill {
     repeat: true
     running: root.overviewOpen && root.hasMedia
     onTriggered: {
-      if (root.player)
+      if (root.player && !root.isWallpaperPlayer(root.player))
         root.player.positionChanged()
       root.displayedPosition = root.player ? root.player.position : 0
     }
@@ -484,7 +518,7 @@ BasePill {
         visible: root.players.length > 1
         onActivated: index => {
           root.selectedPlayer = root.players[index] || null
-          LyricsService.setPlayer(root.player)
+          root.updateLyricsPlayer()
         }
         contentItem: TextInput {
           leftPadding: 12
@@ -686,7 +720,9 @@ BasePill {
           value: Math.min(to, root.displayedPosition)
           enabled: root.player ? root.player.positionSupported : false
           onMoved: {
-            if (root.player)
+            if (root.isWallpaperPlayer(root.player))
+              WallpaperService.seekMedia(Math.round(value * 1000))
+            else if (root.player)
               root.player.position = value
           }
 
@@ -769,7 +805,9 @@ BasePill {
           to: 1
           value: root.player ? root.player.volume : 0
           onMoved: {
-            if (root.player)
+            if (root.isWallpaperPlayer(root.player))
+              WallpaperService.setMediaVolume(value)
+            else if (root.player)
               root.player.volume = value
           }
           background: Item {
@@ -1070,6 +1108,24 @@ BasePill {
         return candidate
     }
     return null
+  }
+
+  function isWallpaperPlayer(candidate) {
+    return candidate === wallpaperPlayer
+  }
+
+  function updateLyricsPlayer() {
+    LyricsService.setPlayer(root.isWallpaperPlayer(root.player) ? null : root.player)
+  }
+
+  function wallpaperTrackTitle() {
+    const controller = WallpaperService.mediaController
+    if (!controller)
+      return qsTr("Wallpaper media")
+    const source = WallpaperService.pathFromUrl(String(controller.mediaSource || ""))
+      .split(/[?#]/)[0]
+    const title = source.slice(source.lastIndexOf("/") + 1).replace(/\.[^.]+$/, "")
+    return title || qsTr("Wallpaper media")
   }
 
   function trackText() {

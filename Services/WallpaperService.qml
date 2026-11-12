@@ -44,6 +44,15 @@ Singleton {
   property bool appPreviewPaused: false
   property bool mediaMuted: false
   property real mediaVolume: 0.45
+  property bool restoringMediaSettings: false
+  onMediaMutedChanged: {
+    if (!root.restoringMediaSettings)
+      mediaControlSaveTimer.restart()
+  }
+  onMediaVolumeChanged: {
+    if (!root.restoringMediaSettings)
+      mediaControlSaveTimer.restart()
+  }
   property bool shortcutCaptureActive: false
   property bool shortcutCheckPending: false
   property bool shortcutApplyPending: false
@@ -88,6 +97,13 @@ Singleton {
   readonly property int mediaDuration: root.mediaController
     ? root.mediaController.duration : 0
 
+  Timer {
+    id: mediaControlSaveTimer
+    interval: 250
+    repeat: false
+    onTriggered: root.persistMediaControls()
+  }
+
   Component.onCompleted: {
     Qt.callLater(scanDirectories)
     Qt.callLater(root.restoreConfiguredShortcut)
@@ -106,6 +122,14 @@ Singleton {
       root.restoreConfiguredShortcut()
       root.restoreAppWindow()
       root.restoreMediaSource()
+    }
+  }
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (event.name === "configreloaded")
+        Qt.callLater(function() { root.restoreConfiguredShortcut(true) })
     }
   }
 
@@ -542,6 +566,64 @@ Singleton {
 
   function mediaAudioSourceFor(source) {
     return root.mediaResolutionFor(source)?.audioSource || ""
+  }
+
+  function mediaStateKey(source) {
+    const value = String(source)
+    return "$" + (value.startsWith("file://") ? root.pathFromUrl(value) : value)
+  }
+
+  function mediaStateForSource(source) {
+    const states = SettingsData.wallpaperMediaStates || ({})
+    return states[root.mediaStateKey(source)] || null
+  }
+
+  function isMediaPlaybackOwner(screen, source) {
+    const target = root.mediaStateKey(source)
+    const owner = Array.from(Quickshell.screens || []).find(candidate => {
+      const type = root.typeForTarget("workspace", candidate)
+      return (type === "video" || type === "audio")
+        && root.mediaStateKey(
+          root.sourceForTarget("workspace", candidate)
+        ) === target
+    })
+    return owner === screen
+  }
+
+  function saveMediaPlaybackState(source, position, playing, muted, volume) {
+    const value = String(source || "")
+    if (!value)
+      return false
+
+    const key = root.mediaStateKey(value)
+    const states = SettingsData.wallpaperMediaStates || ({})
+    const previous = states[key]
+    const next = {
+      position: Math.max(0, Math.round(Number(position) || 0)),
+      playing: !!playing,
+      muted: !!muted,
+      volume: Math.max(0, Math.min(1, Number(volume) || 0))
+    }
+    if (previous
+        && Math.abs((Number(previous.position) || 0) - next.position) < 1000
+        && previous.playing === next.playing
+        && previous.muted === next.muted
+        && Math.abs((Number(previous.volume) || 0) - next.volume) < 0.01)
+      return true
+
+    const updated = Object.assign({}, states)
+    updated[key] = next
+    if (!SettingsData.setMany({ wallpaperMediaStates: updated })) {
+      root.error = qsTr("Could not save wallpaper media playback state.")
+      return false
+    }
+    return true
+  }
+
+  function persistMediaControls() {
+    const controller = root.mediaController
+    if (controller && typeof controller.savePlaybackState === "function")
+      controller.savePlaybackState()
   }
 
   function audioWaveformKey(source) {
@@ -1022,12 +1104,25 @@ Singleton {
   }
 
   function registerMediaController(controller) {
+    if (root.mediaController && root.mediaController !== controller
+        && typeof root.mediaController.savePlaybackState === "function")
+      root.mediaController.savePlaybackState()
+
     root.mediaController = controller
+    const state = root.mediaStateForSource(controller.mediaSource)
+    root.restoringMediaSettings = true
+    root.mediaMuted = state ? !!state.muted : false
+    root.mediaVolume = state && Number.isFinite(Number(state.volume))
+      ? Math.max(0, Math.min(1, Number(state.volume))) : 0.45
+    root.restoringMediaSettings = false
   }
 
   function unregisterMediaController(controller) {
-    if (root.mediaController === controller)
+    if (root.mediaController === controller) {
+      if (typeof controller.savePlaybackState === "function")
+        controller.savePlaybackState()
       root.mediaController = null
+    }
   }
 
   function toggleMediaPlayback() {
@@ -1186,8 +1281,8 @@ Singleton {
     root.shortcutStatusIsError = isError
   }
 
-  function restoreConfiguredShortcut() {
-    if (root.activeShortcut || !SettingsData.wallpaperShortcut
+  function restoreConfiguredShortcut(force) {
+    if ((!force && root.activeShortcut) || !SettingsData.wallpaperShortcut
         || WorkspacesService.backend !== "hyprland")
       return
 

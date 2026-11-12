@@ -87,6 +87,7 @@ var SPEC = {
     wallpaperType: { def: "color" },
     wallpaperApplyScope: { def: "global" },
     wallpaperWorkspaceOverrides: { def: {} },
+    wallpaperMediaStates: { def: {} },
     wallpaperVideoResolution: { def: "best" },
     wallpaperDirectories: { def: [] },
     wallpaperCycleEnabled: { def: false },
